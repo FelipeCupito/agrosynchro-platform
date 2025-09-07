@@ -1,0 +1,21 @@
+version: '3.8'
+
+# Development: docker-compose up -d
+# Production AWS: docker-compose --env-file ../../../.env.production up -d
+
+services:
+  web-dashboard-backend:
+    build: .
+    container_name: agrosynchro-web-dashboard-backend
+    restart: unless-stopped
+    ports:
+      - "${WEB_SERVICE_PORT:-3000}:3000"
+    environment:
+      - PROCESSING_ENGINE_URL=http://${PROCESSING_ENGINE_HOST:-processing-engine}:${PROCESSING_ENGINE_PORT:-8080}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

@@ -1,0 +1,24 @@
+version: '3.8'
+
+# Development: docker-compose up -d
+# Production AWS: docker-compose --env-file ../.env.production up -d
+
+services:
+  mocks:
+    build: .
+    container_name: agrosynchro-mocks
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-agroredispass123}
+      - IOT_GATEWAY_URL=http://${IOT_GATEWAY_HOST:-iot-gateway}:${IOT_GATEWAY_PORT:-8081}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

@@ -1,0 +1,170 @@
+version: '3.8'
+
+# Environment file can be overridden:
+# ENV_FILE=.env.production docker-compose -f docker-compose.dev.yml up -d
+
+services:
+  # Redis Message Queue
+  redis:
+    build: ./services/message-queue
+    container_name: agrosynchro-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT}:6379"
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - agrosynchro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Processing Engine
+  processing-engine:
+    build: ./services/processing-engine
+    container_name: agrosynchro-processing-engine
+    restart: unless-stopped
+    ports:
+      - "${PROCESSING_ENGINE_PORT}:8080"
+    environment:
+      # Redis connection
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      
+      # S3 configuration
+      - S3_ENDPOINT=${S3_ENDPOINT}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - S3_BUCKET=${S3_BUCKET}
+      - AWS_REGION=${AWS_REGION}
+      
+      # Database
+      - DATABASE_PATH=${DATABASE_PATH}
+      
+      # API settings
+      - API_PORT=8080
+      - API_HOST=0.0.0.0
+      - ENVIRONMENT=${ENVIRONMENT}
+    volumes:
+      - processing_data:/data
+    networks:
+      - agrosynchro
+    depends_on:
+      - redis
+      - minio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # IoT Gateway
+  iot-gateway:
+    build: ./services/iot-gateway
+    container_name: agrosynchro-iot-gateway
+    restart: unless-stopped
+    ports:
+      - "${IOT_GATEWAY_PORT:-8081}:8081"
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - ENVIRONMENT=${ENVIRONMENT}
+    networks:
+      - agrosynchro
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Web Dashboard Backend
+  web-dashboard-backend:
+    build: ./services/web-dashboard/backend
+    container_name: agrosynchro-web-dashboard-backend
+    restart: unless-stopped
+    ports:
+      - "${WEB_SERVICE_PORT:-3000}:3000"
+    environment:
+      - PROCESSING_ENGINE_URL=http://${PROCESSING_ENGINE_HOST}:${PROCESSING_ENGINE_PORT}
+      - ENVIRONMENT=${ENVIRONMENT}
+    networks:
+      - agrosynchro
+    depends_on:
+      - processing-engine
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # IoT Mocks (for testing)
+  mocks:
+    build: ./mocks
+    container_name: agrosynchro-mocks
+    restart: unless-stopped
+    ports:
+      - "9002:9000"
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - IOT_GATEWAY_URL=http://${IOT_GATEWAY_HOST}:${IOT_GATEWAY_PORT}
+      - PROCESSING_ENGINE_URL=http://${PROCESSING_ENGINE_HOST}:${PROCESSING_ENGINE_PORT}
+      - ENVIRONMENT=${ENVIRONMENT}
+    networks:
+      - agrosynchro
+    depends_on:
+      - redis
+      - iot-gateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # MinIO (Local S3 for development)
+  minio:
+    image: minio/minio:latest
+    container_name: agrosynchro-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      - agrosynchro
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis_data:
+  processing_data:
+  minio_data:
+
+networks:
+  agrosynchro:
+    driver: bridge
+
+# Development helpers
+# To start all services: docker-compose -f docker-compose.dev.yml up -d
+# To view logs: docker-compose -f docker-compose.dev.yml logs -f
+# To stop all: docker-compose -f docker-compose.dev.yml down

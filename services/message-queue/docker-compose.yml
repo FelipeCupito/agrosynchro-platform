@@ -1,0 +1,22 @@
+version: '3.8'
+
+# Development: docker-compose up -d
+# Production AWS: docker-compose --env-file ../../.env.production up -d
+
+services:
+  redis:
+    build: .
+    container_name: agrosynchro-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "agroredispass123", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis_data:
