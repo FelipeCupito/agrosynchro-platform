@@ -10,13 +10,13 @@
 
 ## Services & Ports
 
-| Service | Port | Protocol | Status | Responsibility |
-|---------|------|----------|---------|----------------|
-| Message Queue (Redis) | 6379 | TCP | ✅ Implemented | Message routing and queuing |
-| Processing Engine API | 8080 | HTTP/REST | ✅ Implemented | Data analysis and processing |
-| Web Dashboard Backend | 3000 | HTTP/REST | ✅ Basic Setup | Backend API for dashboard |
-| Web Dashboard Frontend | 3001 | HTTP | 🔄 To Implement | User interface |
-| IoT Gateway | 8081 | HTTP/REST | ✅ Basic Setup | IoT device communication |
+| Service | Port | Protocol |  Responsibility |
+|---------|------|----------|----------------|
+| Message Queue (Redis) | 6379 | TCP |  Message routing and queuing |
+| Processing Engine API | 8080 | HTTP/REST |  Data analysis and processing |
+| Web Dashboard Backend | 3000 | HTTP/REST |  Backend API for dashboard |
+| Web Dashboard Frontend | 3001 | HTTP |  User interface |
+| IoT Gateway | 8081 | HTTP/REST |  | IoT device communication |
 
 ### Development Tools
 | Tool | Port | Description |

@@ -12,8 +12,9 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
+# Copy source code and test image
 COPY src/ ./src/
+COPY test_image.jpg ./test_image.jpg
 
 # Create non-root user
 RUN groupadd -r agrosynchro && \
