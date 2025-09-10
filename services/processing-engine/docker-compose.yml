@@ -15,7 +15,8 @@ services:
       - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-agroredispass123}
-      
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+
       # S3 configuration
       - S3_ENDPOINT=${S3_ENDPOINT:-}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}

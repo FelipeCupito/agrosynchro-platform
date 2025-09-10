@@ -27,16 +27,16 @@ MOCK_INTERVAL_DRONES = int(os.getenv('MOCK_INTERVAL_DRONES', 120))   # seconds
 
 # Mock configuration
 SENSORS = [
-    {'id': 'SENSOR_001'},
-    {'id': 'SENSOR_002'},
-    {'id': 'SENSOR_003'},
-    {'id': 'SENSOR_004'},
-    {'id': 'SENSOR_005'},
+    {'id': '1'},
+    {'id': '1'},
+    {'id': '1'},
+    {'id': '1'},
+    {'id': '1'},
 ]
 
 DRONES = [
-    {'id': 'DRONE_001'},
-    {'id': 'DRONE_002'},
+    {'id': '1'},
+    {'id': '1'},
 ]
 
 # Global state
@@ -67,7 +67,7 @@ def generate_sensor_data(sensor):
     measurements['soil_moisture'] = round(random.uniform(soil_range['min'], soil_range['max']), 1)
     
     return {
-        'sensor_id': sensor['id'],
+        'user_id': sensor['id'],
         'timestamp': datetime.now().isoformat(),
         'measurements': measurements
     }
@@ -105,11 +105,11 @@ def send_sensor_data():
         if response.status_code == 200:
             stats['sensor_messages_sent'] += 1
             stats['last_sensor_message'] = {
-                'sensor_id': data['sensor_id'],
+                'user_id': data['user_id'],
                 'timestamp': data['timestamp'],
                 'status': 'success'
             }
-            logger.info(f"Sensor data sent successfully: {data['sensor_id']}")
+            logger.info(f"Sensor data sent successfully: {data['user_id']}")
         else:
             stats['errors'] += 1
             logger.error(f"Failed to send sensor data: {response.status_code} - {response.text}")
@@ -279,14 +279,14 @@ def manual_send_sensor():
     """Manually send a sensor data sample"""
     try:
         request_data = request.get_json() if request.is_json else {}
-        sensor_id = request_data.get('sensor_id')
+        user_id = request_data.get('user_id')
         
-        if sensor_id:
-            sensor = next((s for s in SENSORS if s['id'] == sensor_id), None)
+        if user_id:
+            sensor = next((s for s in SENSORS if s['id'] == user_id), None)
             if not sensor:
                 return jsonify({
                     'success': False,
-                    'error': f'Sensor {sensor_id} not found'
+                    'error': f'Sensor {user_id} not found'
                 }), 404
         else:
             sensor = random.choice(SENSORS)

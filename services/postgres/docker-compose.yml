@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: agrosynchro-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agro
+      POSTGRES_PASSWORD: agro123
+      POSTGRES_DB: agrodb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

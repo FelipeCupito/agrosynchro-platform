@@ -134,6 +134,26 @@ services:
       retries: 3
       start_period: 30s
 
+  postgres:
+    image: postgres:15
+    container_name: agrosynchro-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agro
+      POSTGRES_PASSWORD: agro123
+      POSTGRES_DB: agrodb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - agrosynchro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U agro" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # MinIO (Local S3 for development)
   minio:
     image: minio/minio:latest
@@ -159,6 +179,8 @@ volumes:
   redis_data:
   processing_data:
   minio_data:
+  postgres_data:
+
 
 networks:
   agrosynchro:

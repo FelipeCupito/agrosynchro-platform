@@ -113,7 +113,7 @@ def receive_sensor_data():
     Receive sensor data from IoT devices and queue to Redis
     Expected JSON format:
     {
-        "sensor_id": "TEMP_001",
+        "user_id": "TEMP_001",
         "timestamp": "2023-12-01T14:30:22Z",
         "measurements": {
             "temperature": 24.5,
@@ -133,7 +133,7 @@ def receive_sensor_data():
         data = request.get_json()
         
         # Validate required fields
-        required_fields = ['sensor_id', 'timestamp', 'measurements']
+        required_fields = ['user_id', 'timestamp', 'measurements']
         for field in required_fields:
             if field not in data:
                 return jsonify({
@@ -171,7 +171,7 @@ def receive_sensor_data():
         # Queue to Redis
         redis_conn.lpush('sensor_data', json.dumps(data))
         
-        logger.info(f"Sensor data queued for sensor {data['sensor_id']}")
+        logger.info(f"Sensor data queued for sensor {data['user_id']}")
         
         return jsonify({
             'success': True,

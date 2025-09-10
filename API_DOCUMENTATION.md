@@ -36,7 +36,7 @@
 #### Sensor Data Message
 ```json
 {
-  "sensor_id": "TEMP_001",
+  "user_id": "1",
   "timestamp": "2023-12-01T14:30:22Z",
   "measurements": {
     "temperature": 24.5,
@@ -224,7 +224,7 @@ The web service should call Processing Engine API:
 Receive sensor data and queue to Redis
 ```json
 {
-  "sensor_id": "TEMP_001",
+  "user_id": "1",
   "timestamp": "2023-12-01T14:30:22Z",
   "measurements": {
     "temperature": 24.5,
