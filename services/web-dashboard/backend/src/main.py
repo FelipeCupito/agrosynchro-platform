@@ -44,7 +44,7 @@ DB_PATH = "mock.db"
 DB_HOST = "postgres"  # o el nombre del servicio si estás en Docker Compose
 DB_PORT = 5432
 DB_USER = "agro"
-DB_PASS = "agro123"
+DB_PASS = "agro1234"
 DB_NAME = "agrodb"
 
 
@@ -98,7 +98,8 @@ def get_connection():
         host=DB_HOST,
         port=DB_PORT,
         user=DB_USER,
-        password=DB_PASS    )
+        password=DB_PASS,
+        dbname="postgres")
 
 # --- Users POST / GET ---
 @app.route("/api/users", methods=["POST"])
