@@ -141,3 +141,61 @@ docker-compose -f docker-compose.dev.yml down -v
 # Remove only containers
 docker-compose -f docker-compose.dev.yml down
 ```
+
+# Conexión a Instancias Privadas via Bastion Host
+
+## Prerequisitos
+- Bastion Host desplegado en subred pública
+- Tu clave SSH (.pem) configurada
+- IPs del Bastion y instancias privadas
+
+## Conexión SSH Directa
+
+### Comando básico:
+```bash
+ssh -i "tu-key.pem" -J ec2-user@<bastion-ip> ec2-user@<private-instance-ip>
+```
+
+### Ejemplo real:
+```bash
+ssh -i "mykey.pem" -J ec2-user@3.15.123.45 ec2-user@10.0.2.10
+```
+
+## Transferencia de Archivos (SCP)
+
+### Subir archivo a instancia privada:
+```bash
+scp -i "tu-key.pem" -o ProxyJump=ec2-user@<bastion-ip> archivo.txt ec2-user@<private-instance-ip>:~/
+```
+
+### Descargar archivo desde instancia privada:
+```bash
+scp -i "tu-key.pem" -o ProxyJump=ec2-user@<bastion-ip> ec2-user@<private-instance-ip>:~/archivo.txt ./
+```
+
+### Ejemplos reales:
+```bash
+# Subir docker-compose.yml
+scp -i "mykey.pem" -o ProxyJump=ec2-user@3.15.123.45 docker-compose.yml ec2-user@10.0.2.10:~/
+
+# Descargar logs
+scp -i "mykey.pem" -o ProxyJump=ec2-user@3.15.123.45 ec2-user@10.0.2.10:~/app.log ./
+```
+
+
+## Comandos de Deploy Rápido
+
+```bash
+# 1. Conectar a Web Server
+ssh -i "mykey.pem" -J ec2-user@<bastion-ip> ec2-user@10.0.2.10
+
+# 2. Clonar repositorio
+git clone https://github.com/tu-usuario/iot-platform.git
+
+# 3. Levantar servicios
+cd iot-platform
+docker-compose up -d
+
+# 4. Verificar estado
+docker-compose ps
+```
