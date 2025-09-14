@@ -42,3 +42,8 @@ build/
 # AWS credentials (never commit)
 aws-credentials
 .aws/
+
+# Terraform state and configuration files
+.terraform
+*.tfstate
+*.tfstate.backup
