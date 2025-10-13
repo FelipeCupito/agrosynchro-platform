@@ -37,3 +37,35 @@ variable "instance_type_api" {
   description = "Tipo de instancia para el servidor de API"
   default     = "t2.medium"
 }
+
+variable "your_ip" {
+  description = "Tu dirección IP para acceso SSH"
+  default     = "0.0.0.0/0"  # Cambiar por tu IP real en producción
+}
+
+variable "key_pair_name" {
+  description = "Nombre del key pair para las instancias EC2"
+  default     = "my-key"  # Cambiar por tu key pair real
+}
+
+variable "docker_compose_file" {
+  description = "Contenido del archivo docker-compose"
+  default     = ""
+}
+
+variable "db_username" {
+  description = "Username para la base de datos RDS"
+  default     = "agrosynchro"
+}
+
+variable "db_password" {
+  description = "Password para la base de datos RDS"
+  default     = "agrosynchro123"
+  sensitive   = true
+}
+
+variable "redis_password" {
+  description = "Password para ElastiCache Redis"
+  default     = "agroredispass123"
+  sensitive   = true
+}
