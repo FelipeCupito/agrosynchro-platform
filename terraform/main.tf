@@ -47,6 +47,31 @@ module "sqs" {
 }
 
 # =============================================================================
+# S3 MODULE
+# =============================================================================
+module "s3" {
+  source = "./modules/s3"
+  
+  project_name = local.project_name
+  environment  = local.environment
+}
+
+# =============================================================================
+# LAMBDA MODULE
+# =============================================================================
+module "lambda" {
+  source = "./modules/lambda"
+  
+  project_name              = local.project_name
+  environment              = local.environment
+  lambda_role_arn          = module.s3.lambda_s3_role_arn
+  raw_images_bucket_name   = module.s3.raw_images_bucket_name
+  # api_gateway_execution_arn = module.api_gateway.api_gateway_rest_api_execution_arn
+  
+  depends_on = [module.s3]
+}
+
+# =============================================================================
 # API GATEWAY MODULE
 # =============================================================================
 module "api_gateway" {
@@ -58,6 +83,8 @@ module "api_gateway" {
   sqs_queue_name      = module.sqs.queue_name
   sqs_queue_url       = module.sqs.queue_url
   api_gateway_role_arn = module.sqs.api_gateway_role_arn
+  s3_bucket_name      = module.s3.raw_images_bucket_name
+  lambda_invoke_arn   = module.lambda.lambda_invoke_arn
   
   depends_on = [module.sqs]
 }

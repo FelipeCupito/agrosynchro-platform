@@ -139,8 +139,7 @@ resource "aws_api_gateway_deployment" "main" {
   depends_on = [
     aws_api_gateway_integration.ping_integration,
     aws_api_gateway_integration.sqs_integration,
-    aws_api_gateway_integration.drone_image_integration,
-    aws_api_gateway_integration.sensor_data_integration
+    aws_api_gateway_integration.drone_image_integration
   ]
 
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -156,9 +155,6 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.drone_image.id,
       aws_api_gateway_method.drone_image_post.id,
       aws_api_gateway_integration.drone_image_integration.id,
-      aws_api_gateway_resource.sensor_data.id,
-      aws_api_gateway_method.sensor_data_post.id,
-      aws_api_gateway_integration.sensor_data_integration.id,
     ]))
   }
 
@@ -200,143 +196,19 @@ resource "aws_api_gateway_method" "drone_image_post" {
   authorization = "NONE"
 }
 
-# SQS integration for drone images
+# Lambda integration for drone images
 resource "aws_api_gateway_integration" "drone_image_integration" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   resource_id = aws_api_gateway_resource.drone_image.id
   http_method = aws_api_gateway_method.drone_image_post.http_method
-  type        = "AWS"
+  type        = "AWS_PROXY"
   
   integration_http_method = "POST"
-  uri                    = "arn:aws:apigateway:${var.region}:sqs:path/${var.drone_queue_url}"
-  credentials            = var.api_gateway_role_arn
-
-  request_parameters = {
-    "integration.request.header.Content-Type" = "'application/x-amz-json-1.0'"
-  }
-
-  request_templates = {
-    "application/json" = <<EOF
-{
-  "Action": "SendMessage",
-  "MessageBody": "$util.escapeJavaScript($input.body)",
-  "QueueUrl": "${var.drone_queue_url}",
-  "MessageAttributes": {
-    "MessageType": {
-      "DataType": "String",
-      "StringValue": "drone_image"
-    },
-    "S3Bucket": {
-      "DataType": "String", 
-      "StringValue": "${var.s3_bucket_name}"
-    }
-  }
-}
-EOF
-  }
+  uri                    = var.lambda_invoke_arn
 }
 
-# Method response for drone image
-resource "aws_api_gateway_method_response" "drone_image_200" {
-  rest_api_id = aws_api_gateway_rest_api.main.id
-  resource_id = aws_api_gateway_resource.drone_image.id
-  http_method = aws_api_gateway_method.drone_image_post.http_method
-  status_code = "200"
-}
+# Note: Con AWS_PROXY integration, Lambda maneja las respuestas directamente
 
-# Integration response for drone image
-resource "aws_api_gateway_integration_response" "drone_image_response" {
-  depends_on = [aws_api_gateway_integration.drone_image_integration]
-
-  rest_api_id = aws_api_gateway_rest_api.main.id
-  resource_id = aws_api_gateway_resource.drone_image.id
-  http_method = aws_api_gateway_method.drone_image_post.http_method
-  status_code = aws_api_gateway_method_response.drone_image_200.status_code
-
-  response_templates = {
-    "application/json" = "{\"success\": true, \"message\": \"Drone image queued for processing\", \"timestamp\": \"$context.requestTime\"}"
-  }
-}
-
-# =============================================================================
-# SENSOR ENDPOINTS
-# =============================================================================
-
-# /api/sensors resource
-resource "aws_api_gateway_resource" "sensors" {
-  rest_api_id = aws_api_gateway_rest_api.main.id
-  parent_id   = aws_api_gateway_resource.api.id
-  path_part   = "sensors"
-}
-
-# /api/sensors/data resource
-resource "aws_api_gateway_resource" "sensor_data" {
-  rest_api_id = aws_api_gateway_rest_api.main.id
-  parent_id   = aws_api_gateway_resource.sensors.id
-  path_part   = "data"
-}
-
-# POST method for /api/sensors/data
-resource "aws_api_gateway_method" "sensor_data_post" {
-  rest_api_id   = aws_api_gateway_rest_api.main.id
-  resource_id   = aws_api_gateway_resource.sensor_data.id
-  http_method   = "POST"
-  authorization = "NONE"
-}
-
-# SQS integration for sensor data
-resource "aws_api_gateway_integration" "sensor_data_integration" {
-  rest_api_id = aws_api_gateway_rest_api.main.id
-  resource_id = aws_api_gateway_resource.sensor_data.id
-  http_method = aws_api_gateway_method.sensor_data_post.http_method
-  type        = "AWS"
-  
-  integration_http_method = "POST"
-  uri                    = "arn:aws:apigateway:${var.region}:sqs:path/${var.sensor_queue_url}"
-  credentials            = var.api_gateway_role_arn
-
-  request_parameters = {
-    "integration.request.header.Content-Type" = "'application/x-amz-json-1.0'"
-  }
-
-  request_templates = {
-    "application/json" = <<EOF
-{
-  "Action": "SendMessage",
-  "MessageBody": "$util.escapeJavaScript($input.body)",
-  "QueueUrl": "${var.sensor_queue_url}",
-  "MessageAttributes": {
-    "MessageType": {
-      "DataType": "String",
-      "StringValue": "sensor_data"
-    }
-  }
-}
-EOF
-  }
-}
-
-# Method response for sensor data
-resource "aws_api_gateway_method_response" "sensor_data_200" {
-  rest_api_id = aws_api_gateway_rest_api.main.id
-  resource_id = aws_api_gateway_resource.sensor_data.id
-  http_method = aws_api_gateway_method.sensor_data_post.http_method
-  status_code = "200"
-}
-
-# Integration response for sensor data
-resource "aws_api_gateway_integration_response" "sensor_data_response" {
-  depends_on = [aws_api_gateway_integration.sensor_data_integration]
-
-  rest_api_id = aws_api_gateway_rest_api.main.id
-  resource_id = aws_api_gateway_resource.sensor_data.id
-  http_method = aws_api_gateway_method.sensor_data_post.http_method
-  status_code = aws_api_gateway_method_response.sensor_data_200.status_code
-
-  response_templates = {
-    "application/json" = "{\"success\": true, \"message\": \"Sensor data queued successfully\", \"timestamp\": \"$context.requestTime\"}"
-  }
-}
 
 # =============================================================================
 # UPDATED DEPLOYMENT

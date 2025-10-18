@@ -4,7 +4,9 @@
       "Bash(mkdir:*)",
       "Bash(tree:*)",
       "Read(//Users/felucupito/WorkSpace/agrosynchro/**)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(docker-compose:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

@@ -69,3 +69,13 @@ variable "redis_password" {
   default     = "agroredispass123"
   sensitive   = true
 }
+
+variable "aws_profile" {
+  description = "AWS profile to use"
+  default     = "default"
+}
+
+variable "aws_endpoint_url" {
+  description = "AWS endpoint URL for LocalStack"
+  default     = ""
+}

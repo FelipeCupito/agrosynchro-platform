@@ -34,12 +34,8 @@ variable "s3_bucket_name" {
   type        = string
 }
 
-variable "sensor_queue_url" {
-  description = "SQS queue URL for sensor data"
-  type        = string
-}
 
-variable "drone_queue_url" {
-  description = "SQS queue URL for drone data"
+variable "lambda_invoke_arn" {
+  description = "Lambda function invoke ARN for drone image processing"
   type        = string
 }

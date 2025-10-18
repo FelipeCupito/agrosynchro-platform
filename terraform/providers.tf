@@ -37,6 +37,7 @@ provider "aws" {
       apigateway      = "http://localhost:4566"
       cloudformation  = "http://localhost:4566"
       cloudwatch      = "http://localhost:4566"
+      cloudwatchlogs  = "http://localhost:4566"
       dynamodb        = "http://localhost:4566"
       ec2             = "http://localhost:4566"
       ecs             = "http://localhost:4566"
@@ -54,11 +55,16 @@ provider "aws" {
   # Configuración específica para LocalStack
   access_key = terraform.workspace == "local" ? "test" : null
   secret_key = terraform.workspace == "local" ? "test" : null
+  token      = terraform.workspace == "local" ? "test" : null
   
   # Skip validations para LocalStack
   skip_credentials_validation = terraform.workspace == "local" ? true : false
   skip_metadata_api_check     = terraform.workspace == "local" ? true : false
   skip_requesting_account_id  = terraform.workspace == "local" ? true : false
+  skip_region_validation      = terraform.workspace == "local" ? true : false
+  
+  # Force path style para S3 en LocalStack
+  s3_use_path_style = terraform.workspace == "local" ? true : false
   
   # Configuración común
   default_tags {
