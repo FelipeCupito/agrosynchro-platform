@@ -63,6 +63,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "raw_images_lifecycle" {
   rule {
     id     = "delete_old_raw_images"
     status = "Enabled"
+    
+    filter {
+      prefix = ""
+    }
 
     expiration {
       days = 30
@@ -124,6 +128,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "processed_images_lifecycle" {
   rule {
     id     = "archive_old_processed_images"
     status = "Enabled"
+    
+    filter {
+      prefix = ""
+    }
 
     # Move to IA after 30 days
     transition {

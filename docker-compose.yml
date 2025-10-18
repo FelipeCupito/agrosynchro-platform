@@ -7,7 +7,7 @@ services:
       - "4566:4566"                # Main LocalStack endpoint
       - "4510-4559:4510-4559"      # Additional service ports
     environment:
-      - SERVICES=apigateway,sqs,s3,lambda,logs,ecs,rds,iam,sts,ec2
+      - SERVICES=apigateway,sqs,s3,lambda,logs,ecs,rds,iam,sts,ec2,ecr,secretsmanager,cloudwatch
       - DEBUG=1
       - PERSISTENCE=1
       - DATA_DIR=/var/lib/localstack/data
@@ -54,6 +54,8 @@ services:
       retries: 3
       start_period: 30s
 
+  # PostgreSQL para desarrollo local
+  # En producción se usa RDS
   postgres:
     image: postgres:15
     container_name: agrosynchro-postgres
@@ -69,14 +71,14 @@ services:
     networks:
       - agrosynchro
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U agro" ]
+      test: ["CMD-SHELL", "pg_isready -U agro"]
       interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
-  postgres_data:
   localstack_data:
+  postgres_data:
 
 networks:
   agrosynchro:

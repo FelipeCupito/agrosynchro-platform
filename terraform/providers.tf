@@ -40,6 +40,7 @@ provider "aws" {
       cloudwatchlogs  = "http://localhost:4566"
       dynamodb        = "http://localhost:4566"
       ec2             = "http://localhost:4566"
+      ecr             = "http://localhost:4566"
       ecs             = "http://localhost:4566"
       elasticache     = "http://localhost:4566"
       iam             = "http://localhost:4566"

@@ -8,7 +8,7 @@ import os
 import json
 import threading
 import time
-import redis
+import boto3
 import smtplib
 from email.mime.text import MIMEText
 from flask import Flask, jsonify, request
@@ -25,39 +25,44 @@ CORS(app)
 # ---------------------
 # Environment configuration
 # ---------------------
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "agroredispass123")
+# AWS Configuration
+SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
+AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+RAW_IMAGES_BUCKET = os.getenv("RAW_IMAGES_BUCKET")
+PROCESSED_IMAGES_BUCKET = os.getenv("PROCESSED_IMAGES_BUCKET")
+
+# Database Configuration
+DB_HOST = os.getenv("DB_HOST", "postgres")
+DB_PORT = int(os.getenv("DB_PORT", 5432))
+DB_USER = os.getenv("DB_USER", "agro")
+DB_PASS = os.getenv("DB_PASSWORD", "agro123")
+DB_NAME = os.getenv("DB_NAME", "agrodb")
+
 # Configuración SMTP SendGrid
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-SMTP_USER = os.getenv("SMTP_USER", "partitba@gmail.com")  # siempre "apikey" en SendGrid
+SMTP_USER = os.getenv("SMTP_USER", "partitba@gmail.com")
 SMTP_PASS = os.getenv("SMTP_PASS", "zsxp daba umvz kzar")
 
 ALERT_EMAIL = os.getenv("ALERT_EMAIL", "alertas@agrosynchro.com")
 
-# Redis connection
-redis_client = None
+# AWS clients
+sqs_client = None
+s3_client = None
 
 
-def get_redis_connection():
-    global redis_client
-    if redis_client is None:
+def get_aws_clients():
+    global sqs_client, s3_client
+    if sqs_client is None:
         try:
-            redis_client = redis.Redis(
-                host=REDIS_HOST,
-                port=REDIS_PORT,
-                password=REDIS_PASSWORD,
-                decode_responses=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-            )
-            redis_client.ping()
-            logger.info("Redis connection established")
+            sqs_client = boto3.client('sqs', region_name=AWS_REGION)
+            s3_client = boto3.client('s3', region_name=AWS_REGION)
+            logger.info("AWS clients initialized")
         except Exception as e:
-            logger.error(f"Redis connection failed: {e}")
-            redis_client = None
-    return redis_client
+            logger.error(f"AWS clients initialization failed: {e}")
+            sqs_client = None
+            s3_client = None
+    return sqs_client, s3_client
 
 
 # ---------------------
@@ -116,7 +121,7 @@ def get_user_parameters(user_id):
         port=DB_PORT,
         user=DB_USER,
         password=DB_PASS,
-        dbname="postgres"
+        dbname=DB_NAME
     )
     cursor = conn.cursor()
 
@@ -156,7 +161,7 @@ def insert_sensor_data(user_id, measure, value, timestamp):
         port=DB_PORT,
         user=DB_USER,
         password=DB_PASS,
-        dbname="postgres"
+        dbname=DB_NAME
     )
     cursor = conn.cursor()
     cursor.execute(
@@ -169,52 +174,80 @@ def insert_sensor_data(user_id, measure, value, timestamp):
 
 def worker():
     global worker_running
-    redis_conn = get_redis_connection()
-    if not redis_conn:
-        logger.error("Worker stopped: Redis unavailable")
+    sqs, s3 = get_aws_clients()
+    if not sqs:
+        logger.error("Worker stopped: AWS clients unavailable")
         return
 
-    logger.info("Worker started, listening to sensor_data queue...")
+    if not SQS_QUEUE_URL:
+        logger.error("Worker stopped: SQS_QUEUE_URL not configured")
+        return
+
+    logger.info(f"Worker started, polling SQS queue: {SQS_QUEUE_URL}")
     while worker_running:
         try:
-            msg = redis_conn.brpop("sensor_data", timeout=5)
-            if not msg:
-                logger.info("no message")
+            # Poll SQS for messages
+            response = sqs.receive_message(
+                QueueUrl=SQS_QUEUE_URL,
+                MaxNumberOfMessages=10,
+                WaitTimeSeconds=20,  # Long polling
+                VisibilityTimeoutSeconds=300  # 5 minutes to process
+            )
+            
+            messages = response.get('Messages', [])
+            if not messages:
+                logger.debug("No messages received")
                 continue
-            _, data = msg
-            payload = json.loads(data)
+                
+            logger.info(f"Received {len(messages)} messages")
+            
+            for message in messages:
+                try:
+                    payload = json.loads(message['Body'])
+                    
+                    user_id = payload.get("user_id")
+                    measurements = payload.get("measurements", {})
+                    timestamp = payload.get("timestamp", time.strftime("%Y-%m-%d %H:%M:%S"))
 
-            user_id = payload.get("user_id")
-            measurements = payload.get("measurements", {})
-            timestamp = payload.get("timestamp", time.strftime("%Y-%m-%d %H:%M:%S"))
+                    if not user_id:
+                        logger.warning("No user_id in message")
+                        continue
 
-            if not user_id:
-                logger.warning("No user_id in message")
-                continue
+                    params = get_user_parameters(user_id)
+                    if not params:
+                        logger.warning(f"No parameters found for user {user_id}")
+                        continue
 
-            params = get_user_parameters(user_id)
-            if not params:
-                logger.warning(f"No parameters found for user {user_id}")
-                continue
+                    user_email = params["email"]
 
-            user_email = params["email"]
+                    for measurement, value in measurements.items():
+                        insert_sensor_data(user_id, measurement, value, timestamp)
 
-            for measurement, value in measurements.items():
-                insert_sensor_data(user_id, measurement, value, timestamp)
+                        min_val = params.get(f"min_{measurement}")
+                        max_val = params.get(f"max_{measurement}")
 
-                min_val = params.get(f"min_{measurement}")
-                max_val = params.get(f"max_{measurement}")
+                        if min_val is None or max_val is None:
+                            continue
 
-                if min_val is None or max_val is None:
-                    continue
+                        logger.info(f"Sensor {measurement}: value={value}, min={min_val}, max={max_val}")
 
-                logger.info(f"Sensor {measurement}: value={value}, min={min_val}, max={max_val}")
-
-                if value < min_val or value > max_val:
-                    logger.info(
-                        f"ALERTA: User {user_id} {measurement}={value} fuera de rango {min_val}-{max_val}"
+                        if value < min_val or value > max_val:
+                            logger.info(
+                                f"ALERTA: User {user_id} {measurement}={value} fuera de rango {min_val}-{max_val}"
+                            )
+                            send_email_alert(user_email, user_id, measurement, value, (min_val, max_val))
+                    
+                    # Delete message from queue after successful processing
+                    sqs.delete_message(
+                        QueueUrl=SQS_QUEUE_URL,
+                        ReceiptHandle=message['ReceiptHandle']
                     )
-                    send_email_alert(user_email, user_id, measurement, value, (min_val, max_val))
+                    logger.info("Message processed and deleted from queue")
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"Invalid JSON in message: {e}")
+                except Exception as e:
+                    logger.error(f"Error processing message: {e}")
 
         except Exception as e:
             logger.error(f"Worker error: {e}")
@@ -252,6 +285,6 @@ def ping():
 
 
 if __name__ == "__main__":
-    logger.info("Starting IoT Consumer...")
-    get_redis_connection()
+    logger.info("Starting Processing Engine (SQS version)...")
+    get_aws_clients()
     app.run(host="0.0.0.0", port=8080, debug=False)

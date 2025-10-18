@@ -93,27 +93,54 @@ module "api_gateway" {
 # PLACEHOLDER MODULES (A completar)
 # =============================================================================
 
-# TODO: Fargate Module
-# module "fargate" {
-#   source = "./modules/fargate"
-#   
-#   project_name        = local.project_name
-#   vpc_id             = module.networking.vpc_id
-#   private_subnet_ids = module.networking.private_subnet_ids
-#   sqs_queue_url      = module.sqs.queue_url
-#   fargate_role_arn   = module.sqs.fargate_role_arn
-# }
+# =============================================================================
+# FARGATE MODULE - AWS Real
+# =============================================================================
+module "fargate" {
+  source = "./modules/fargate"
+  
+  project_name        = local.project_name
+  aws_region         = local.region
+  vpc_id             = module.networking.vpc_id
+  vpc_cidr           = var.vpc_cidr_block
+  private_subnet_ids = module.networking.private_subnet_ids
+  
+  # SQS integration
+  sqs_queue_url      = module.sqs.queue_url
+  sqs_queue_arn      = module.sqs.queue_arn
+  
+  # S3 integration
+  raw_images_bucket_name      = module.s3.raw_images_bucket_name
+  raw_images_bucket_arn       = module.s3.raw_images_bucket_arn
+  processed_images_bucket_name = module.s3.processed_images_bucket_name
+  processed_images_bucket_arn  = module.s3.processed_images_bucket_arn
+  
+  # RDS integration
+  rds_endpoint             = module.rds.db_instance_endpoint
+  rds_db_name             = module.rds.db_name
+  rds_username            = module.rds.db_username
+  rds_password_secret_arn = module.rds.password_secret_arn
+  
+  depends_on = [module.sqs, module.s3, module.rds]
+}
 
-# TODO: RDS Module  
-# module "rds" {
-#   source = "./modules/rds"
-#   
-#   project_name       = local.project_name
-#   vpc_id            = module.networking.vpc_id
-#   private_subnet_ids = module.networking.private_subnet_ids
-#   db_username       = var.db_username
-#   db_password       = var.db_password
-# }
+# =============================================================================
+# RDS MODULE - Testing with LocalStack
+# =============================================================================
+module "rds" {
+  source = "./modules/rds"
+  
+  project_name       = local.project_name
+  vpc_id            = module.networking.vpc_id
+  vpc_cidr          = var.vpc_cidr_block
+  private_subnet_ids = module.networking.private_subnet_ids
+  db_username       = var.db_username
+  db_password       = var.db_password
+  
+  # AWS settings
+  db_instance_class = local.environment == "local" ? "db.t3.micro" : "db.t3.small"
+  create_read_replica = local.environment == "aws" ? true : false
+}
 
 # TODO: S3 Module
 # module "s3" {
