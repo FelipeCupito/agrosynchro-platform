@@ -4,108 +4,34 @@ version: '3.8'
 # ENV_FILE=.env.production docker-compose -f docker-compose.dev.yml up -d
 
 services:
-  # Redis Message Queue
-  redis:
-    build: ./services/message-queue
-    container_name: agrosynchro-redis
+  # LocalStack
+  localstack:
+    container_name: agrosynchro-localstack
+    image: localstack/localstack:latest
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT}:6379"
+      - "4566:4566"                # Main LocalStack endpoint
+      - "4510-4559:4510-4559"      # Additional service ports
     environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - SERVICES=apigateway,sqs,s3,ecs,rds,iam,sts,ec2
+      - DEBUG=1
+      - PERSISTENCE=1
+      - DATA_DIR=/tmp/localstack/data
+      - HOST_TMP_FOLDER=/tmp/localstack
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
     volumes:
-      - redis_data:/data
+      - "./tmp/localstack:/tmp/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
     networks:
       - agrosynchro
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-
-  # Processing Engine
-  processing-engine:
-    build: ./services/processing-engine
-    container_name: agrosynchro-processing-engine
-    restart: unless-stopped
-    ports:
-      - "${PROCESSING_ENGINE_PORT}:8080"
-    environment:
-      # Redis connection
-      - REDIS_HOST=${REDIS_HOST}
-      - REDIS_PORT=${REDIS_PORT}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      
-      # S3 configuration
-      - S3_ENDPOINT=${S3_ENDPOINT}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - S3_BUCKET=${S3_BUCKET}
-      - AWS_REGION=${AWS_REGION}
-      
-      # Database
-      - DATABASE_PATH=${DATABASE_PATH}
-      
-      # API settings
-      - API_PORT=8080
-      - API_HOST=0.0.0.0
-      - ENVIRONMENT=${ENVIRONMENT}
-    volumes:
-      - processing_data:/data
-    networks:
-      - agrosynchro
-    depends_on:
-      - redis
-      - minio
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  # IoT Gateway
-  iot-gateway:
-    build: ./services/iot-gateway
-    container_name: agrosynchro-iot-gateway
-    restart: unless-stopped
-    ports:
-      - "${IOT_GATEWAY_PORT:-8081}:8081"
-    environment:
-      - REDIS_HOST=${REDIS_HOST}
-      - REDIS_PORT=${REDIS_PORT}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - ENVIRONMENT=${ENVIRONMENT}
-    networks:
-      - agrosynchro
-    depends_on:
-      - redis
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  # Web Dashboard Backend
-  web-dashboard-backend:
-    build: ./services/web-dashboard/backend
-    container_name: agrosynchro-web-dashboard-backend
-    restart: unless-stopped
-    ports:
-      - "${WEB_SERVICE_PORT:-3000}:3000"
-    environment:
-      - PROCESSING_ENGINE_URL=http://${PROCESSING_ENGINE_HOST}:${PROCESSING_ENGINE_PORT}
-      - ENVIRONMENT=${ENVIRONMENT}
-    networks:
-      - agrosynchro
-    depends_on:
-      - processing-engine
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      retries: 5
       start_period: 30s
 
   # IoT Mocks (for testing)
@@ -116,17 +42,15 @@ services:
     ports:
       - "9002:9000"
     environment:
-      - REDIS_HOST=${REDIS_HOST}
-      - REDIS_PORT=${REDIS_PORT}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - IOT_GATEWAY_URL=http://${IOT_GATEWAY_HOST}:${IOT_GATEWAY_PORT}
-      - PROCESSING_ENGINE_URL=http://${PROCESSING_ENGINE_HOST}:${PROCESSING_ENGINE_PORT}
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_DEFAULT_REGION=us-east-1
       - ENVIRONMENT=${ENVIRONMENT}
     networks:
       - agrosynchro
     depends_on:
-      - redis
-      - iot-gateway
+      - localstack
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/ping"]
       interval: 30s
@@ -176,8 +100,6 @@ services:
       retries: 3
 
 volumes:
-  redis_data:
-  processing_data:
   minio_data:
   postgres_data:
 
@@ -188,5 +110,11 @@ networks:
 
 # Development helpers
 # To start all services: docker-compose -f docker-compose.dev.yml up -d
+# To start only LocalStack: docker-compose -f docker-compose.dev.yml up -d localstack
 # To view logs: docker-compose -f docker-compose.dev.yml logs -f
 # To stop all: docker-compose -f docker-compose.dev.yml down
+# 
+# For Terraform with LocalStack:
+# 1. Start LocalStack: docker-compose -f docker-compose.dev.yml up -d localstack
+# 2. Switch to local workspace: terraform workspace select local
+# 3. Apply infrastructure: terraform apply
