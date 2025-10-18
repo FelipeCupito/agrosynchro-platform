@@ -24,90 +24,20 @@ resource "aws_ecs_cluster" "main" {
 }
 
 # =============================================================================
-# IAM ROLES
+# IAM ROLES - Using existing LabRole
 # =============================================================================
 
-# Task execution role
-resource "aws_iam_role" "task_execution" {
-  name = "${var.project_name}-fargate-execution-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ecs-tasks.amazonaws.com"
-        }
-      }
-    ]
-  })
+# Use existing LabRole for task execution
+data "aws_iam_role" "task_execution" {
+  name = "LabRole"
 }
 
-resource "aws_iam_role_policy_attachment" "task_execution" {
-  role       = aws_iam_role.task_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+# Use existing LabRole for task role
+data "aws_iam_role" "task" {
+  name = "LabRole"
 }
 
-# Task role (for app permissions)
-resource "aws_iam_role" "task" {
-  name = "${var.project_name}-fargate-task-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ecs-tasks.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-# Task policy for SQS, S3, RDS
-resource "aws_iam_role_policy" "task_policy" {
-  name = "${var.project_name}-fargate-task-policy"
-  role = aws_iam_role.task.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "sqs:ReceiveMessage",
-          "sqs:DeleteMessage",
-          "sqs:GetQueueAttributes"
-        ]
-        Resource = var.sqs_queue_arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject"
-        ]
-        Resource = [
-          "${var.raw_images_bucket_arn}/*",
-          "${var.processed_images_bucket_arn}/*"
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-}
+# Skip custom policies - LabRole has admin permissions
 
 # =============================================================================
 # SECURITY GROUP
@@ -177,8 +107,8 @@ resource "aws_ecs_task_definition" "processing_engine" {
   requires_compatibilities = ["FARGATE"]
   cpu                      = var.fargate_cpu
   memory                   = var.fargate_memory
-  execution_role_arn       = aws_iam_role.task_execution.arn
-  task_role_arn            = aws_iam_role.task.arn
+  execution_role_arn       = data.aws_iam_role.task_execution.arn
+  task_role_arn            = data.aws_iam_role.task.arn
 
   container_definitions = jsonencode([
     {

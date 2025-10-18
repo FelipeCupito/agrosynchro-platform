@@ -28,95 +28,16 @@ resource "aws_sqs_queue" "dlq" {
   }
 }
 
-# IAM Role for API Gateway to access SQS
-resource "aws_iam_role" "api_gateway_sqs_role" {
-  name = "${var.project_name}-api-gateway-sqs-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "apigateway.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name = "${var.project_name}-api-gateway-sqs-role"
-  }
+# Use existing LabRole for API Gateway
+data "aws_iam_role" "api_gateway_sqs_role" {
+  name = "LabRole"
 }
 
-# IAM Policy for API Gateway to send messages to SQS
-resource "aws_iam_role_policy" "api_gateway_sqs_policy" {
-  name = "${var.project_name}-api-gateway-sqs-policy"
-  role = aws_iam_role.api_gateway_sqs_role.id
+# Skip custom policies - LabRole has admin permissions
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "sqs:SendMessage",
-          "sqs:GetQueueAttributes",
-          "sqs:GetQueueUrl"
-        ]
-        Resource = [
-          aws_sqs_queue.main.arn,
-          aws_sqs_queue.dlq.arn
-        ]
-      }
-    ]
-  })
+# Use existing LabRole for Fargate
+data "aws_iam_role" "fargate_sqs_role" {
+  name = "LabRole"
 }
 
-# IAM Role for Fargate to access SQS
-resource "aws_iam_role" "fargate_sqs_role" {
-  name = "${var.project_name}-fargate-sqs-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ecs-tasks.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name = "${var.project_name}-fargate-sqs-role"
-  }
-}
-
-# IAM Policy for Fargate to consume messages from SQS
-resource "aws_iam_role_policy" "fargate_sqs_policy" {
-  name = "${var.project_name}-fargate-sqs-policy"
-  role = aws_iam_role.fargate_sqs_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "sqs:ReceiveMessage",
-          "sqs:DeleteMessage",
-          "sqs:GetQueueAttributes",
-          "sqs:GetQueueUrl"
-        ]
-        Resource = [
-          aws_sqs_queue.main.arn,
-          aws_sqs_queue.dlq.arn
-        ]
-      }
-    ]
-  })
-}
+# Skip custom policies - LabRole has admin permissions

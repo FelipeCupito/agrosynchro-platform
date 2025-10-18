@@ -47,12 +47,12 @@ output "processed_images_bucket_domain_name" {
 # IAM Roles Outputs
 output "lambda_s3_role_arn" {
   description = "IAM role ARN for Lambda to access S3"
-  value       = aws_iam_role.lambda_s3_role.arn
+  value       = data.aws_iam_role.lambda_s3_role.arn
 }
 
 output "fargate_s3_role_arn" {
   description = "IAM role ARN for Fargate to access S3"
-  value       = aws_iam_role.fargate_s3_role.arn
+  value       = data.aws_iam_role.fargate_s3_role.arn
 }
 
 # Bucket URLs for easy access

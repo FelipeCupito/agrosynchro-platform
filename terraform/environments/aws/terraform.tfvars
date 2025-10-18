@@ -15,3 +15,10 @@ key_pair_name = "vockey"  # AWS Academy default key pair
 
 # AWS endpoint (default - remove for real AWS)
 # aws_endpoint_url = ""
+
+# Database settings  
+db_username = "agro"
+db_password = "agro12345"
+
+# Disable read replica until main DB is ready
+create_read_replica = false

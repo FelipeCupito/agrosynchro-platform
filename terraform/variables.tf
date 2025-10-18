@@ -28,16 +28,6 @@ variable "private_subnet_2_cidr" {
   default     = "10.0.3.0/24"
 }
 
-variable "instance_type_web" {
-  description = "Tipo de instancia para el servidor web"
-  default     = "t2.medium"
-}
-
-variable "instance_type_api" {
-  description = "Tipo de instancia para el servidor de API"
-  default     = "t2.medium"
-}
-
 variable "your_ip" {
   description = "Tu dirección IP para acceso SSH"
   default     = "0.0.0.0/0"  # Cambiar por tu IP real en producción
@@ -46,11 +36,6 @@ variable "your_ip" {
 variable "key_pair_name" {
   description = "Nombre del key pair para las instancias EC2"
   default     = "my-key"  # Cambiar por tu key pair real
-}
-
-variable "docker_compose_file" {
-  description = "Contenido del archivo docker-compose"
-  default     = ""
 }
 
 variable "db_username" {
@@ -64,11 +49,7 @@ variable "db_password" {
   sensitive   = true
 }
 
-variable "redis_password" {
-  description = "Password para ElastiCache Redis"
-  default     = "agroredispass123"
-  sensitive   = true
-}
+# Redis variable removed - using SQS instead
 
 variable "aws_profile" {
   description = "AWS profile to use"
@@ -78,4 +59,10 @@ variable "aws_profile" {
 variable "aws_endpoint_url" {
   description = "AWS endpoint URL for LocalStack"
   default     = ""
+}
+
+variable "create_read_replica" {
+  description = "Whether to create RDS read replica"
+  type        = bool
+  default     = true
 }

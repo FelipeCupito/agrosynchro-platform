@@ -221,66 +221,16 @@ data "aws_iam_policy_document" "fargate_s3_policy" {
   }
 }
 
-# IAM role for Lambda
-resource "aws_iam_role" "lambda_s3_role" {
-  name = "${var.project_name}-lambda-s3-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name = "${var.project_name}-lambda-s3-role"
-  }
+# Use existing LabRole for Lambda
+data "aws_iam_role" "lambda_s3_role" {
+  name = "LabRole"
 }
 
-# Attach basic Lambda execution policy
-resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
-  role       = aws_iam_role.lambda_s3_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+# Skip custom policies - LabRole has admin permissions
+
+# Use existing LabRole for Fargate
+data "aws_iam_role" "fargate_s3_role" {
+  name = "LabRole"
 }
 
-# Attach S3 policy to Lambda role
-resource "aws_iam_role_policy" "lambda_s3_access" {
-  name = "${var.project_name}-lambda-s3-access"
-  role = aws_iam_role.lambda_s3_role.id
-  policy = data.aws_iam_policy_document.lambda_s3_policy.json
-}
-
-# IAM role for Fargate
-resource "aws_iam_role" "fargate_s3_role" {
-  name = "${var.project_name}-fargate-s3-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ecs-tasks.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name = "${var.project_name}-fargate-s3-role"
-  }
-}
-
-# Attach S3 policy to Fargate role
-resource "aws_iam_role_policy" "fargate_s3_access" {
-  name = "${var.project_name}-fargate-s3-access"
-  role = aws_iam_role.fargate_s3_role.id
-  policy = data.aws_iam_policy_document.fargate_s3_policy.json
-}
+# Skip custom policies - LabRole has admin permissions

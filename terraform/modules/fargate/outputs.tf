@@ -35,10 +35,10 @@ output "security_group_id" {
 
 output "task_role_arn" {
   description = "ECS task role ARN"
-  value       = aws_iam_role.task.arn
+  value       = data.aws_iam_role.task.arn
 }
 
 output "execution_role_arn" {
   description = "ECS task execution role ARN"
-  value       = aws_iam_role.task_execution.arn
+  value       = data.aws_iam_role.task_execution.arn
 }

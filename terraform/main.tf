@@ -139,61 +139,15 @@ module "rds" {
   
   # AWS settings
   db_instance_class = local.environment == "local" ? "db.t3.micro" : "db.t3.small"
-  create_read_replica = local.environment == "aws" ? true : false
+  create_read_replica = var.create_read_replica
 }
 
-# TODO: S3 Module
-# module "s3" {
-#   source = "./modules/s3"
-#   
-#   project_name = local.project_name
-#   vpc_id      = module.networking.vpc_id
-# }
+# S3 Module already implemented above
 
 # =============================================================================
-# TEMPORARY: Bastion Host (para acceso y debugging)
+# BASTION HOST REMOVED - Not needed in serverless architecture
 # =============================================================================
-resource "aws_security_group" "bastion_sg" {
-  name        = "${local.project_name}-bastion-sg"
-  description = "Security group for bastion host"
-  vpc_id      = module.networking.vpc_id
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.your_ip]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(local.common_tags, {
-    Name = "${local.project_name}-bastion-sg"
-  })
-}
-
-resource "aws_instance" "bastion" {
-  count = local.environment == "aws" ? 1 : 0
-  
-  ami                    = "ami-0583d8c7a9c35822c"  # Amazon Linux 2023
-  instance_type          = "t3.micro"
-  subnet_id              = module.networking.public_subnet_ids[0]
-  vpc_security_group_ids = [aws_security_group.bastion_sg.id]
-  key_name               = var.key_pair_name
-
-  user_data = base64encode(<<-EOF
-    #!/bin/bash
-    yum update -y
-    yum install -y git aws-cli
-  EOF
-  )
-
-  tags = merge(local.common_tags, {
-    Name = "${local.project_name}-bastion-host"
-  })
-}
+# Debugging ahora se hace con:
+# - CloudWatch Logs para Lambda/Fargate
+# - AWS Console para RDS/S3/SQS
+# - AWS CLI local para testing

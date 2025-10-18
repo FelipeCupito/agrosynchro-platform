@@ -106,7 +106,7 @@ resource "aws_db_parameter_group" "postgresql" {
 resource "aws_db_instance" "main" {
   identifier     = "${var.project_name}-postgres"
   engine         = "postgres"
-  engine_version = "15.4"
+  engine_version = "15.8"
   instance_class = var.db_instance_class
 
   allocated_storage     = var.db_allocated_storage
@@ -212,6 +212,10 @@ resource "aws_iam_role_policy_attachment" "rds_monitoring" {
 resource "aws_cloudwatch_log_group" "postgresql" {
   name              = "/aws/rds/instance/${aws_db_instance.main.identifier}/postgresql"
   retention_in_days = 14
+
+  lifecycle {
+    ignore_changes = [name]
+  }
 
   tags = {
     Name = "${var.project_name}-postgres-logs"

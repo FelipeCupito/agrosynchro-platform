@@ -50,8 +50,8 @@ output "sqs_dlq_url" {
 # ACCESS OUTPUTS
 # =============================================================================
 output "bastion_public_ip" {
-  description = "Bastion host public IP (AWS only)"
-  value       = length(aws_instance.bastion) > 0 ? aws_instance.bastion[0].public_ip : "N/A - Local environment"
+  description = "Bastion host removed - using serverless architecture"
+  value       = "N/A - Serverless architecture"
 }
 
 # =============================================================================
@@ -89,10 +89,10 @@ output "quick_start_info" {
     
     🔧 SQS Queue: ${module.sqs.queue_url}
     
-    ${length(aws_instance.bastion) > 0 ? "🖥️  Bastion Host: ${aws_instance.bastion[0].public_ip}" : "🐳 Local Environment: Use LocalStack"}
+    🚀 Serverless Architecture Deployed!
     
     📚 Next steps:
-    ${terraform.workspace == "local" ? "1. Make sure LocalStack is running" : "1. Connect to bastion host"}
+    ${terraform.workspace == "local" ? "1. Make sure LocalStack is running" : "1. Deploy containers to Fargate"}
     2. Deploy Fargate services
     3. Set up RDS database
     4. Configure S3 buckets
