@@ -104,14 +104,7 @@ import psycopg2
 
 from datetime import datetime
 
-DB_PATH = "mock_db.sqlite"
-
-DB_PATH = "mock.db"
-DB_HOST = "postgres"  # o el nombre del servicio si estás en Docker Compose
-DB_PORT = 5432
-DB_USER = "agro"
-DB_PASS = "agro1234"
-DB_NAME = "agrodb"
+# Database configuration now uses environment variables from top of file
 
 
 
@@ -156,102 +149,109 @@ def get_user_parameters(user_id):
     return None
 
 def insert_sensor_data(user_id, measure, value, timestamp):
-    conn = psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        user=DB_USER,
-        password=DB_PASS,
-        dbname=DB_NAME
-    )
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO sensor_data (user_id, timestamp, measure, value) VALUES (%s, %s, %s, %s)",
-        (user_id, timestamp, measure, value),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        logger.info(f"🔄 Inserting sensor data: user_id={user_id}, measure={measure}, value={value}, timestamp={timestamp}")
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            user=DB_USER,
+            password=DB_PASS,
+            dbname=DB_NAME
+        )
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO sensor_data (user_id, timestamp, measure, value) VALUES (%s, %s, %s, %s)",
+            (user_id, timestamp, measure, value),
+        )
+        conn.commit()
+        conn.close()
+        logger.info(f"✅ Successfully inserted sensor data for user {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Failed to insert sensor data: {e}")
+        raise
 
 
 def worker():
     global worker_running
-    sqs, s3 = get_aws_clients()
-    if not sqs:
-        logger.error("Worker stopped: AWS clients unavailable")
-        return
+    try:
+        sqs, s3 = get_aws_clients()
+        if not sqs:
+            logger.error("Worker stopped: AWS clients unavailable")
+            return
 
-    if not SQS_QUEUE_URL:
-        logger.error("Worker stopped: SQS_QUEUE_URL not configured")
-        return
+        if not SQS_QUEUE_URL:
+            logger.error("Worker stopped: SQS_QUEUE_URL not configured")
+            return
 
-    logger.info(f"Worker started, polling SQS queue: {SQS_QUEUE_URL}")
-    while worker_running:
-        try:
-            # Poll SQS for messages with optimized long polling
-            response = sqs.receive_message(
-                QueueUrl=SQS_QUEUE_URL,
-                MaxNumberOfMessages=10,
-                WaitTimeSeconds=20,  # Long polling - SQS notifies immediately when messages arrive
-                VisibilityTimeoutSeconds=300  # 5 minutes to process
-            )
-            
-            messages = response.get('Messages', [])
-            if not messages:
-                logger.debug("No messages received")
-                continue
+        logger.info(f"Worker started, polling SQS queue: {SQS_QUEUE_URL}")
+        while worker_running:
+            try:
+                # Poll SQS for messages with optimized long polling
+                response = sqs.receive_message(
+                    QueueUrl=SQS_QUEUE_URL,
+                    MaxNumberOfMessages=10,
+                    WaitTimeSeconds=20,  # Long polling - SQS notifies immediately when messages arrive
+                    VisibilityTimeout=300  # 5 minutes to process
+                )
                 
-            logger.info(f"Received {len(messages)} messages")
-            
-            for message in messages:
-                try:
-                    payload = json.loads(message['Body'])
+                messages = response.get('Messages', [])
+                if not messages:
+                    logger.debug("No messages received")
+                    continue
                     
-                    user_id = payload.get("user_id")
-                    measurements = payload.get("measurements", {})
-                    timestamp = payload.get("timestamp", time.strftime("%Y-%m-%d %H:%M:%S"))
+                logger.info(f"📨 Received {len(messages)} sensor messages")
+                
+                for message in messages:
+                    try:
+                        payload = json.loads(message['Body'])
+                        logger.info(f"🔍 Processing sensor message: {payload}")
+                        
+                        user_id = payload.get("user_id")
+                        timestamp = payload.get("timestamp", time.strftime("%Y-%m-%d %H:%M:%S"))
+                        
+                        # Handle both formats: single measure or measurements object
+                        if "measure" in payload and "value" in payload:
+                            # Single measurement format
+                            measure = payload.get("measure")
+                            value = payload.get("value")
+                            measurements = {measure: value}
+                        else:
+                            # Multiple measurements format
+                            measurements = payload.get("measurements", {})
 
-                    if not user_id:
-                        logger.warning("No user_id in message")
-                        continue
-
-                    params = get_user_parameters(user_id)
-                    if not params:
-                        logger.warning(f"No parameters found for user {user_id}")
-                        continue
-
-                    user_email = params["email"]
-
-                    for measurement, value in measurements.items():
-                        insert_sensor_data(user_id, measurement, value, timestamp)
-
-                        min_val = params.get(f"min_{measurement}")
-                        max_val = params.get(f"max_{measurement}")
-
-                        if min_val is None or max_val is None:
+                        if not user_id:
+                            logger.warning("No user_id in message, skipping")
                             continue
 
-                        logger.info(f"Sensor {measurement}: value={value}, min={min_val}, max={max_val}")
+                        if not measurements:
+                            logger.warning("No measurements in message, skipping")
+                            continue
 
-                        if value < min_val or value > max_val:
-                            logger.info(
-                                f"ALERTA: User {user_id} {measurement}={value} fuera de rango {min_val}-{max_val}"
-                            )
-                            send_email_alert(user_email, user_id, measurement, value, (min_val, max_val))
-                    
-                    # Delete message from queue after successful processing
-                    sqs.delete_message(
-                        QueueUrl=SQS_QUEUE_URL,
-                        ReceiptHandle=message['ReceiptHandle']
-                    )
-                    logger.info("Message processed and deleted from queue")
-                    
-                except json.JSONDecodeError as e:
-                    logger.error(f"Invalid JSON in message: {e}")
-                except Exception as e:
-                    logger.error(f"Error processing message: {e}")
+                        logger.info(f"💾 Saving sensor data for user {user_id}: {measurements}")
 
-        except Exception as e:
-            logger.error(f"Worker error: {e}")
-            time.sleep(2)
+                        for measurement, value in measurements.items():
+                            insert_sensor_data(user_id, measurement, value, timestamp)
+                            logger.info(f"✅ Saved sensor data: {measurement}={value} for user {user_id}")
+                        
+                        # Delete message from queue after successful processing
+                        sqs.delete_message(
+                            QueueUrl=SQS_QUEUE_URL,
+                            ReceiptHandle=message['ReceiptHandle']
+                        )
+                        logger.info("📤 Message processed and deleted from queue")
+                        
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Invalid JSON in message: {e}")
+                    except Exception as e:
+                        logger.error(f"Error processing message: {e}")
+
+            except Exception as e:
+                logger.error(f"Worker error: {e}")
+                time.sleep(2)
+                
+    except Exception as e:
+        logger.error(f"❌ Failed to start SQS worker: {e}")
+        raise
 
 
 # ---------------------
@@ -332,6 +332,155 @@ def health():
         }
     
     return jsonify(health_data)
+
+
+@app.route("/api/sensors/average", methods=["GET"])
+def get_sensor_averages():
+    """Get recent sensor data averages"""
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST, port=DB_PORT, user=DB_USER, 
+            password=DB_PASS, dbname=DB_NAME
+        )
+        cursor = conn.cursor()
+        
+        # Get last 5 minutes of data for averages
+        cursor.execute("""
+            SELECT measure, AVG(value) as avg_value, COUNT(*) as count
+            FROM sensor_data 
+            WHERE timestamp >= NOW() - INTERVAL '5 minutes'
+            GROUP BY measure
+        """)
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        averages = {}
+        sensors_count = 0
+        for measure, avg_value, count in results:
+            averages[measure] = round(float(avg_value), 2)
+            sensors_count += count
+        
+        return jsonify({
+            "success": True,
+            "data": {
+                "timestamp": datetime.now().isoformat(),
+                "sensors_count": sensors_count,
+                "averages": averages
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting sensor averages: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/api/images/analysis", methods=["GET"])
+def get_image_analysis():
+    """Get recent image analysis results"""
+    try:
+        limit = request.args.get('limit', 10, type=int)
+        
+        conn = psycopg2.connect(
+            host=DB_HOST, port=DB_PORT, user=DB_USER, 
+            password=DB_PASS, dbname=DB_NAME
+        )
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT drone_id, raw_s3_key, processed_s3_key, field_status, 
+                   analysis_confidence, analyzed_at, processed_at
+            FROM drone_images 
+            WHERE analyzed_at IS NOT NULL
+            ORDER BY analyzed_at DESC 
+            LIMIT %s
+        """, (limit,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        analyses = []
+        for row in results:
+            analyses.append({
+                "drone_id": row[0],
+                "raw_s3_key": row[1],
+                "processed_s3_key": row[2],
+                "field_status": row[3],
+                "analysis_confidence": float(row[4]) if row[4] else 0.0,
+                "analyzed_at": row[5].isoformat() if row[5] else None,
+                "processed_at": row[6].isoformat() if row[6] else None
+            })
+        
+        return jsonify({
+            "success": True,
+            "data": analyses,
+            "count": len(analyses)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting image analysis: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+
+@app.route("/api/sensors/data", methods=["GET"])
+def get_sensor_data():
+    """Get recent sensor data for debugging/testing"""
+    try:
+        limit = request.args.get('limit', 20, type=int)
+        user_id = request.args.get('user_id', None)
+        
+        conn = psycopg2.connect(
+            host=DB_HOST, port=DB_PORT, user=DB_USER, 
+            password=DB_PASS, dbname=DB_NAME
+        )
+        cursor = conn.cursor()
+        
+        if user_id:
+            cursor.execute("""
+                SELECT user_id, timestamp, measure, value
+                FROM sensor_data 
+                WHERE user_id = %s
+                ORDER BY timestamp DESC 
+                LIMIT %s
+            """, (user_id, limit))
+        else:
+            cursor.execute("""
+                SELECT user_id, timestamp, measure, value
+                FROM sensor_data 
+                ORDER BY timestamp DESC 
+                LIMIT %s
+            """, (limit,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        data = []
+        for row in results:
+            data.append({
+                "user_id": row[0],
+                "timestamp": row[1].isoformat() if row[1] else None,
+                "measure": row[2],
+                "value": float(row[3]) if row[3] else 0.0
+            })
+        
+        return jsonify({
+            "success": True,
+            "data": data,
+            "count": len(data)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting sensor data: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
 # ---------------------
@@ -594,10 +743,23 @@ if __name__ == "__main__":
     # Run migrations first
     run_startup_migrations()
     
-    # Iniciar worker de imágenes automáticamente
+    # Iniciar workers automáticamente
     worker_running = True
-    image_worker_thread = threading.Thread(target=image_polling_worker, daemon=True)
-    image_worker_thread.start()
-    logger.info("Image processing worker started automatically")
+    
+    # SQS worker for sensor data processing
+    try:
+        sqs_worker_thread = threading.Thread(target=worker, daemon=True)
+        sqs_worker_thread.start()
+        logger.info("✅ SQS worker started automatically")
+    except Exception as e:
+        logger.error(f"❌ Failed to start SQS worker: {e}")
+    
+    # Image worker for S3 polling
+    try:
+        image_worker_thread = threading.Thread(target=image_polling_worker, daemon=True)
+        image_worker_thread.start()
+        logger.info("✅ Image processing worker started automatically")
+    except Exception as e:
+        logger.error(f"❌ Failed to start image worker: {e}")
     
     app.run(host="0.0.0.0", port=8080, debug=False)

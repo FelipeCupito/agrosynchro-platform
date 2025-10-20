@@ -49,6 +49,9 @@ resource "aws_security_group" "fargate" {
   description = "Security group for Fargate processing tasks"
   vpc_id      = var.vpc_id
 
+  # Allow HTTP from ALB (will be added via separate rule)
+  # ingress rules added separately to avoid circular dependency
+
   # Only outbound access needed (SQS, S3, RDS, ECR)
   egress {
     from_port   = 443
@@ -65,8 +68,6 @@ resource "aws_security_group" "fargate" {
     cidr_blocks = var.db_subnet_cidrs
     description = "PostgreSQL access to database subnets"
   }
-
-  # No ingress needed - processing engine only consumes from SQS
   tags = {
     Name = "${var.project_name}-fargate-sg"
   }
@@ -128,6 +129,7 @@ resource "aws_ecs_task_definition" "processing_engine" {
       portMappings = [
         {
           containerPort = 8080
+          hostPort      = 8080
           protocol      = "tcp"
         }
       ]
@@ -164,15 +166,15 @@ resource "aws_ecs_task_definition" "processing_engine" {
         {
           name  = "DB_USER"
           value = var.rds_username
+        },
+        {
+          name  = "DB_PASSWORD"
+          value = var.rds_password
         }
       ]
 
-      secrets = [
-        {
-          name      = "DB_PASSWORD"
-          valueFrom = var.rds_password_secret_arn
-        }
-      ]
+      # Secrets disabled for AWS Academy compatibility
+      # secrets = []
 
       logConfiguration = {
         logDriver = "awslogs"
@@ -184,7 +186,7 @@ resource "aws_ecs_task_definition" "processing_engine" {
       }
 
       healthCheck = {
-        command = ["CMD-SHELL", "curl -f http://localhost:8080/ping || exit 1"]
+        command = ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
         interval = 30
         timeout = 5
         retries = 3
@@ -216,6 +218,15 @@ resource "aws_ecs_service" "processing_engine" {
     security_groups  = [aws_security_group.fargate.id]
     assign_public_ip = false
   }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.fargate.arn
+    container_name   = "processing-engine"
+    container_port   = 8080
+  }
+
+  # Wait for ALB target group
+  depends_on = [aws_lb_listener.fargate]
 
   # Auto scaling
   lifecycle {
@@ -252,4 +263,106 @@ resource "aws_appautoscaling_policy" "fargate_cpu" {
     }
     target_value = 70.0
   }
+}
+
+# =============================================================================
+# APPLICATION LOAD BALANCER
+# =============================================================================
+
+# Security Group for ALB
+resource "aws_security_group" "alb" {
+  name        = "${var.project_name}-alb-sg"
+  description = "Security group for Application Load Balancer"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP access from internet"
+  }
+
+  egress {
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+    description = "HTTP access to Fargate tasks"
+  }
+
+  tags = {
+    Name = "${var.project_name}-alb-sg"
+  }
+}
+
+# Application Load Balancer
+resource "aws_lb" "fargate" {
+  name               = "${var.project_name}-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = var.public_subnet_ids
+
+  enable_deletion_protection = false
+
+  tags = {
+    Name = "${var.project_name}-alb"
+  }
+}
+
+# Target Group
+resource "aws_lb_target_group" "fargate" {
+  name     = "${var.project_name}-tg"
+  port     = 8080
+  protocol = "HTTP"
+  vpc_id   = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+    interval            = 30
+    path                = "/health"
+    matcher             = "200"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+  }
+
+  tags = {
+    Name = "${var.project_name}-target-group"
+  }
+}
+
+# Listener
+resource "aws_lb_listener" "fargate" {
+  load_balancer_arn = aws_lb.fargate.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.fargate.arn
+  }
+
+  tags = {
+    Name = "${var.project_name}-alb-listener"
+  }
+}
+
+# =============================================================================
+# SECURITY GROUP RULES (separate to avoid circular dependency)
+# =============================================================================
+
+# Allow ALB to access Fargate
+resource "aws_security_group_rule" "alb_to_fargate" {
+  type                     = "ingress"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.alb.id
+  security_group_id        = aws_security_group.fargate.id
+  description              = "HTTP access from ALB to Fargate"
 }

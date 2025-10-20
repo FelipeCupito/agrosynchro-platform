@@ -9,28 +9,10 @@
 data "aws_region" "current" {}
 
 # =============================================================================
-# SECRETS MANAGER
+# SECRETS MANAGER - DISABLED FOR AWS ACADEMY COMPATIBILITY
 # =============================================================================
-
-resource "aws_secretsmanager_secret" "db_password" {
-  name        = "${var.project_name}-db-password-${random_string.secret_suffix.result}"
-  description = "Database password for ${var.project_name}"
-
-  tags = {
-    Name = "${var.project_name}-db-password"
-  }
-}
-
-resource "random_string" "secret_suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
-resource "aws_secretsmanager_secret_version" "db_password" {
-  secret_id     = aws_secretsmanager_secret.db_password.id
-  secret_string = var.db_password
-}
+# AWS Academy doesn't support Secrets Manager service
+# Using direct password variable instead
 
 # =============================================================================
 # SUBNET GROUP

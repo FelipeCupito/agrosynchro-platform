@@ -1,7 +1,41 @@
-# AgroSynchro - AWS Deployment
-terraform apply -auto-approve -var-file="environments/aws/terraform.tfvars"
+# AgroSynchro - Plataforma Cloud para Agricultura de Precisión
 
-## Pasos para deployar la infraestructura en AWS:
+> **Arquitectura Serverless AWS** - Integración de datos IoT y análisis de imágenes de drones para optimización agrícola
+
+## 🏗️ Arquitectura General
+
+### Diseño Serverless (AWS)
+```
+📱 Ingesta Externa                    🎯 Dashboard Interno
+     ↓                                        ↓
+[IoT/Drones] → [API Gateway] → [SQS] → [Fargate] ← [ALB] ← [Frontend S3]
+                     ↓             ↓        ↓
+                [Lambda] → [S3] → [IA] → [RDS PostgreSQL]
+```
+
+### Separación de Responsabilidades
+- **API Gateway**: Recepción de datos externos (sensores IoT, drones)  
+- **Application Load Balancer**: Backend del dashboard web y APIs internas
+- **Fargate**: Motor de procesamiento containerizado con auto-scaling
+- **RDS**: Base de datos PostgreSQL Multi-AZ para persistencia
+
+## 🚀 Despliegue Automatizado (Un Solo Comando)
+
+```bash
+# Despliegue completo automatizado
+./deploy.sh
+```
+
+Este script ejecuta:
+1. ✅ Validación de prerequisitos (AWS CLI, Docker, Terraform)
+2. ✅ Inicialización y planificación de Terraform  
+3. ✅ Despliegue de infraestructura AWS
+4. ✅ Build y push de imagen Docker a ECR
+5. ✅ Actualización de servicios Fargate
+6. ✅ Migración automática de base de datos
+7. ✅ Validación de endpoints
+
+## 📋 Pasos manuales (para debugging):
 
 ### Prerequisites
 - AWS CLI configurado con credenciales válidas
@@ -58,48 +92,82 @@ terraform output api_gateway_invoke_url
 
 ### 10. **Probar endpoints:**
 ```bash
-# Reemplazar [API_URL] con la salida del comando anterior
+# Obtener URLs de los endpoints
 API_URL=$(terraform output -raw api_gateway_invoke_url)
+ALB_URL=$(terraform output -raw alb_health_check_url)
 
-# Ping
+# === API Gateway (Ingesta Externa) ===
+# Health check
 curl -X GET "$API_URL/ping"
 
-# Messages
+# Sensor data
 curl -X POST "$API_URL/messages" \
   -H "Content-Type: application/json" \
   -d '{"message": "test from sensor"}'
 
-# Drone image upload
+# Drone image upload  
 curl -X POST "$API_URL/api/drones/image" \
   -H "Content-Type: multipart/form-data" \
   -F "image=@test-image.jpg" \
   -F "drone_id=drone001" \
   -F "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# === ALB Dashboard (APIs Internas) ===
+# Database health check
+curl -X GET "$ALB_URL"
+
+# Sensor averages
+curl -X GET "${ALB_URL%/health}/api/sensors/average"
+
+# Image analysis results
+curl -X GET "${ALB_URL%/health}/api/images/analysis?limit=5"
 ```
 
-## Arquitectura Desplegada
+## 🏗️ Arquitectura Desplegada
 
-La infraestructura incluye:
+### Infraestructura de Red (VPC)
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        VPC (10.0.0.0/16)                   │
+├─────────────────────────────────────────────────────────────┤
+│ 🌐 Public Subnets (10.0.1-2.0/24)                          │
+│   ├── Internet Gateway                                      │
+│   ├── NAT Gateways                                         │
+│   └── Application Load Balancer                            │
+├─────────────────────────────────────────────────────────────┤  
+│ 🔒 Private Subnets (10.0.3-4.0/24)                         │
+│   ├── ECS Fargate Containers                               │
+│   └── Processing Engine Services                           │
+├─────────────────────────────────────────────────────────────┤
+│ 🗄️ Database Subnets (10.0.5-6.0/24)                        │
+│   └── RDS PostgreSQL (Multi-AZ)                            │
+└─────────────────────────────────────────────────────────────┘
+```
 
-- **VPC con 3 capas de subnets:**
-  - Public subnets (NAT Gateway, Load Balancer)
-  - Private subnets (Fargate containers)
-  - Database subnets (RDS isolated)
+### Servicios AWS Desplegados
 
-- **Servicios principales:**
-  - API Gateway (entrada principal)
-  - Lambda (procesamiento de imágenes)
-  - SQS + DLQ (cola de mensajes)
-  - Fargate (contenedores serverless)
-  - RDS PostgreSQL Multi-AZ + Read Replica
-  - S3 buckets (raw + processed images)
-  - ECR (registro de imágenes Docker)
+#### 🔄 Ingesta y Procesamiento
+- **API Gateway**: Punto de entrada para datos externos
+- **AWS Lambda**: Procesamiento de uploads de imágenes  
+- **SQS + DLQ**: Cola de mensajes con manejo de errores
+- **ECS Fargate**: Contenedores auto-escalables (1-10 instancias)
 
-- **Seguridad:**
-  - Security Groups con principio de menor privilegio
-  - Encryption en reposo (S3, SQS, RDS)
-  - VPC endpoints para servicios AWS
-  - IAM roles con LabRole (AWS Academy)
+#### 💾 Almacenamiento y Datos
+- **RDS PostgreSQL**: Base de datos Multi-AZ con backups automáticos
+- **S3 Buckets**: Almacenamiento de imágenes (raw + procesadas)
+- **ECR**: Registro privado de imágenes Docker
+- **Secrets Manager**: Gestión segura de passwords
+
+#### 🌐 Acceso y Frontend  
+- **Application Load Balancer**: Backend APIs para dashboard
+- **API Gateway**: APIs públicas para ingesta de datos
+
+### 🔐 Seguridad Implementada
+- **Red**: Security Groups con principio de menor privilegio
+- **Datos**: Cifrado AES-256 en reposo (S3, SQS, RDS)
+- **Tráfico**: HTTPS/TLS para todas las comunicaciones
+- **Acceso**: IAM roles con permisos mínimos (LabRole para AWS Academy)
+- **Aislamiento**: VPC privada con subnets aisladas por función
 
 ## Monitoreo
 

@@ -47,3 +47,6 @@ aws-credentials
 .terraform
 *.tfstate
 *.tfstate.backup
+
+# claude
+.claude/

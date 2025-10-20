@@ -105,6 +105,7 @@ module "fargate" {
   vpc_id             = module.networking.vpc_id
   vpc_cidr           = var.vpc_cidr_block
   private_subnet_ids = module.networking.private_subnet_ids
+  public_subnet_ids  = module.networking.public_subnet_ids
   db_subnet_cidrs    = [var.db_subnet_1_cidr, var.db_subnet_2_cidr]
   
   # SQS integration
@@ -117,11 +118,11 @@ module "fargate" {
   processed_images_bucket_name = module.s3.processed_images_bucket_name
   processed_images_bucket_arn  = module.s3.processed_images_bucket_arn
   
-  # RDS integration
-  rds_endpoint             = module.rds.db_instance_endpoint
-  rds_db_name             = module.rds.db_name
-  rds_username            = module.rds.db_username
-  rds_password_secret_arn = module.rds.password_secret_arn
+  # RDS integration (extract hostname without port)
+  rds_endpoint    = split(":", module.rds.db_instance_endpoint)[0]
+  rds_db_name     = module.rds.db_name
+  rds_username    = module.rds.db_username
+  rds_password    = var.db_password
   
   depends_on = [module.sqs, module.s3, module.rds]
 }

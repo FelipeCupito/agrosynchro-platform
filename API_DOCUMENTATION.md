@@ -1,35 +1,61 @@
 # AgroSynchro - API Documentation & Service Specifications
 
-## Architecture Overview
+## Architecture Overview (AWS Serverless)
 
+### Current Implementation (Serverless AWS)
 ```
-[IoT Sensors/Drones] → [IoT Gateway] → [Message Queue] → [Processing Engine] → [Web Service] → [Frontend]
-                                           ↓
-                                    [Database Storage]
+[IoT Sensors/Drones] → [API Gateway] → [SQS Queue] → [Fargate Processing] → [RDS PostgreSQL]
+                            ↓              ↓               ↓                    ↓
+                       [Lambda Upload] → [S3 Storage] → [AI Analysis] → [ALB Dashboard]
+                                                           ↓
+                                                    [Frontend (S3)]
 ```
 
-## Services & Ports
+### Service Separation
+```
+📱 External Data Ingestion:
+   API Gateway ← IoT Sensors, Drones, External APIs
 
-| Service | Port | Protocol |  Responsibility |
-|---------|------|----------|----------------|
-| Message Queue (Redis) | 6379 | TCP |  Message routing and queuing |
-| Processing Engine API | 8080 | HTTP/REST |  Data analysis and processing |
-| Web Dashboard Backend | 3000 | HTTP/REST |  Backend API for dashboard |
-| Web Dashboard Frontend | 3001 | HTTP |  User interface |
-| IoT Gateway | 8081 | HTTP/REST |  | IoT device communication |
+🎯 Internal Dashboard & Analytics:  
+   ALB ← Frontend, Management, Reports
+```
 
-### Development Tools
-| Tool | Port | Description |
-|------|------|-------------|
-| Mocks | 9000 | IoT data generators and testing tools |
-| MinIO (S3 Local) | 9000-9001 | Local S3-compatible storage |
+## AWS Services & Endpoints
 
-## Message Queue Schemas
+### External Data Ingestion (API Gateway)
+| Endpoint | Method | Purpose | Authentication |
+|----------|--------|---------|---------------|
+| `/ping` | GET | Health check | None |
+| `/messages` | POST | IoT sensor data ingestion | None (will add Cognito) |
+| `/api/drones/image` | POST | Drone image upload | None (will add Cognito) |
 
-### Redis Queue Names
-- `sensor_data` - Environmental sensor readings
-- `drone_data` - Drone imagery and telemetry
-- `alerts` - System alerts and notifications
+### Internal Dashboard Backend (Application Load Balancer)
+| Endpoint | Method | Purpose | Port |
+|----------|--------|---------|------|
+| `/health` | GET | Database connectivity check | 80 |
+| `/api/sensors/average` | GET | Real-time sensor averages | 80 |
+| `/api/images/analysis` | GET | Image analysis results | 80 |
+| `/api/alerts/configure` | POST | Configure sensor alerts | 80 |
+| `/api/alerts` | GET | Get active alerts | 80 |
+
+### AWS Infrastructure Services
+| Service | Purpose | Configuration |
+|---------|---------|---------------|
+| **API Gateway** | External data ingestion | Regional, throttling enabled |
+| **Application Load Balancer** | Dashboard backend routing | Public, health checks |
+| **ECS Fargate** | Processing engine containers | Auto-scaling 1-10 instances |
+| **RDS PostgreSQL** | Data persistence | Multi-AZ, encrypted |
+| **SQS + DLQ** | Message queuing | Encryption, dead letter handling |
+| **S3 Buckets** | Image storage | Versioning, lifecycle policies |
+| **Lambda** | Image upload processing | Triggered by API Gateway |
+
+## Message Queue Schemas (AWS SQS)
+
+### SQS Queue Configuration
+- **Main Queue**: `agrosynchro-processing-queue` - Sensor data and image metadata
+- **Dead Letter Queue**: `agrosynchro-dlq` - Failed message handling
+- **Encryption**: AES-256 server-side encryption
+- **Retention**: 14 days for main queue, 14 days for DLQ
 
 ### Message Schemas
 
@@ -65,20 +91,28 @@
 }
 ```
 
-## Processing Engine API (Port 8080)
+## Processing Engine API (ALB + Fargate)
 
-### Base URL: `http://localhost:8080`
+### Base URLs:
+- **ALB Backend**: `http://{alb-dns-name}/` - Dashboard APIs
+- **API Gateway**: `https://{api-gateway-url}/` - Data ingestion
+
+### ALB Dashboard Endpoints
 
 ### Health Endpoint
 
 #### GET `/health`
-Health check endpoint
+**Purpose**: Database connectivity and system health check
+**Access**: Available via ALB public endpoint
 ```json
 {
   "status": "healthy",
   "timestamp": "2023-12-01T14:30:22Z",
   "uptime_seconds": 3600,
-  "database_connected": true
+  "database_connected": true,
+  "database_migrations": "completed",
+  "sqs_accessible": true,
+  "s3_accessible": true
 }
 ```
 
@@ -263,102 +297,102 @@ Response:
 1. **Sensor Data**: Validate → Queue to Redis `sensor_data`
 2. **Drone Images**: Upload to S3 → Queue metadata to Redis `drone_data`
 
-## Database Schema (Processing Engine Responsibility)
+## Database Schema (AWS RDS PostgreSQL)
 
-### Processing Engine Database (SQLite)
+### RDS Configuration
+- **Engine**: PostgreSQL 15.8
+- **Instance**: Multi-AZ for high availability
+- **Storage**: GP3 SSD with encryption
+- **Backup**: 7-day retention, automated backups
+- **Security**: VPC isolated, accessed only from Fargate
+
+### Database Tables
+
+#### users
+```sql
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL,
+    email TEXT NOT NULL
+);
+```
+
+#### parameters
+```sql
+CREATE TABLE parameters (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    temperature REAL,
+    humidity REAL,
+    soil_moisture REAL,
+    min_temperature REAL,
+    max_temperature REAL,
+    min_humidity REAL,
+    max_humidity REAL,
+    min_soil_moisture REAL,
+    max_soil_moisture REAL
+);
+```
 
 #### sensor_data
 ```sql
 CREATE TABLE sensor_data (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sensor_id TEXT NOT NULL,
-    timestamp TEXT NOT NULL,
-    temperature REAL,
-    humidity REAL,
-    soil_moisture REAL,
-    processed_at TEXT NOT NULL
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    timestamp TIMESTAMP NOT NULL,
+    measure TEXT NOT NULL,
+    value REAL NOT NULL
 );
 ```
 
-#### image_analyses
+#### drone_images
 ```sql
-CREATE TABLE image_analyses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    drone_id TEXT NOT NULL,
-    s3_path TEXT NOT NULL,
-    analyzed_at TEXT NOT NULL,
-    field_status TEXT NOT NULL -- excellent, good, fair, poor, critical
+CREATE TABLE drone_images (
+    id SERIAL PRIMARY KEY,
+    drone_id VARCHAR(255),
+    raw_s3_key VARCHAR(500),
+    processed_s3_key VARCHAR(500),
+    field_status VARCHAR(50) DEFAULT 'unknown',
+    analysis_confidence REAL DEFAULT 0.0,
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    analyzed_at TIMESTAMP
 );
 ```
 
-#### alert_config
-```sql
-CREATE TABLE alert_config (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    alert_name TEXT NOT NULL,
-    sensor_type TEXT NOT NULL,
-    min_value REAL,
-    max_value REAL,
-    enabled BOOLEAN DEFAULT 1,
-    created_at TEXT NOT NULL
-);
-```
+## Environment Configuration (AWS Serverless)
 
-## Environment Configuration
+### ECS Fargate Container Environment
+The Processing Engine runs as a containerized service with environment variables:
 
-All services use centralized environment configuration from root `.env` file.
-
-### Development (.env)
 ```bash
-# Redis Configuration
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_PASSWORD=agroredispass123
+# AWS Configuration
+AWS_DEFAULT_REGION=us-east-1
 
-# Processing Engine
-PROCESSING_ENGINE_HOST=processing-engine
-PROCESSING_ENGINE_PORT=8080
+# SQS Configuration  
+SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/account/agrosynchro-processing-queue
 
-# S3 Configuration (Local MinIO)
-S3_ENDPOINT=http://minio:9000
-S3_BUCKET=agrosynchro-drone-images
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=agrosynchro
-AWS_SECRET_ACCESS_KEY=agrosynchro123
+# S3 Configuration
+RAW_IMAGES_BUCKET=agrosynchro-raw-images
+PROCESSED_IMAGES_BUCKET=agrosynchro-processed-images
 
-# Database
-DATABASE_PATH=/data/processing.db
-
-# IoT Gateway & Web Service (when implemented)
-IOT_GATEWAY_HOST=iot-gateway
-IOT_GATEWAY_PORT=8081
-WEB_SERVICE_HOST=web-service
-WEB_SERVICE_PORT=3000
-
-ENVIRONMENT=development
+# RDS Configuration
+DB_HOST=agrosynchro-postgres.xxxxx.rds.amazonaws.com
+DB_PORT=5432
+DB_NAME=agrosynchro
+DB_USER=agro
+DB_PASSWORD=[from AWS Secrets Manager]
 ```
 
-### Production (.env.production)
-```bash
-# Redis Configuration (AWS ElastiCache or ECS)
-REDIS_HOST=agrosynchro-redis.cluster.local
-REDIS_PORT=6379
-REDIS_PASSWORD=your-secure-redis-password
+### Infrastructure Access Patterns
 
-# Processing Engine (AWS ECS service)
-PROCESSING_ENGINE_HOST=agrosynchro-processing.cluster.local
-PROCESSING_ENGINE_PORT=8080
+#### Data Flow
+1. **IoT Sensors** → API Gateway `/messages` → SQS → Fargate Processing
+2. **Drone Images** → API Gateway `/api/drones/image` → Lambda → S3 → SQS → Fargate Analysis  
+3. **Dashboard Queries** → ALB → Fargate → RDS → Response
+4. **Health Checks** → ALB `/health` → Fargate → RDS connectivity test
 
-# S3 Configuration (Real AWS S3)
-S3_ENDPOINT=
-S3_BUCKET=agrosynchro-drone-images-prod
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=your-aws-key
-AWS_SECRET_ACCESS_KEY=your-aws-secret
-
-# Services (AWS Load Balancer endpoints)
-IOT_GATEWAY_HOST=agrosynchro-iot.cluster.local
-WEB_SERVICE_HOST=agrosynchro-web.cluster.local
-
-ENVIRONMENT=production
-```
+#### Security Architecture
+- **Network**: VPC with private/public subnet isolation
+- **Data**: Encryption at rest (RDS, S3, SQS) and in transit (HTTPS)
+- **Access**: IAM roles with least privilege (LabRole for AWS Academy)
+- **Monitoring**: CloudWatch logs and metrics for all services

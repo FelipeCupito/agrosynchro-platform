@@ -43,12 +43,8 @@ output "subnet_group_name" {
   value       = aws_db_subnet_group.main.name
 }
 
-output "password_secret_arn" {
-  description = "Database password secret ARN"
-  value       = aws_secretsmanager_secret.db_password.arn
-}
-
-output "password_secret_name" {
-  description = "Database password secret name"
-  value       = aws_secretsmanager_secret.db_password.name
-}
+# Secrets Manager outputs disabled for AWS Academy compatibility
+# output "password_secret_arn" {
+#   description = "Database password secret ARN"  
+#   value       = aws_secretsmanager_secret.db_password.arn
+# }

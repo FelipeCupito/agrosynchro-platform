@@ -78,6 +78,19 @@ output "processed_images_bucket_name" {
 }
 
 # =============================================================================
+# FARGATE OUTPUTS
+# =============================================================================
+output "alb_dns_name" {
+  description = "Application Load Balancer DNS name"
+  value       = module.fargate.alb_dns_name
+}
+
+output "alb_health_check_url" {
+  description = "ALB health check endpoint"
+  value       = "http://${module.fargate.alb_dns_name}/health"
+}
+
+# =============================================================================
 # ACCESS OUTPUTS
 # =============================================================================
 output "bastion_public_ip" {

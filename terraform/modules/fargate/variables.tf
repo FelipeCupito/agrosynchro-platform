@@ -23,6 +23,11 @@ variable "private_subnet_ids" {
   type        = list(string)
 }
 
+variable "public_subnet_ids" {
+  description = "Public subnet IDs for ALB"
+  type        = list(string)
+}
+
 variable "db_subnet_cidrs" {
   description = "Database subnet CIDRs for security group access"
   type        = list(string)
@@ -73,9 +78,10 @@ variable "rds_username" {
   type        = string
 }
 
-variable "rds_password_secret_arn" {
-  description = "RDS password secret ARN"
+variable "rds_password" {
+  description = "RDS password (direct for AWS Academy)"
   type        = string
+  sensitive   = true
 }
 
 variable "fargate_cpu" {
