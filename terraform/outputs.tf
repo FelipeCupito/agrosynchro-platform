@@ -47,6 +47,37 @@ output "sqs_dlq_url" {
 }
 
 # =============================================================================
+# RDS OUTPUTS
+# =============================================================================
+output "rds_endpoint" {
+  description = "RDS instance endpoint"
+  value       = module.rds.db_instance_endpoint
+}
+
+output "rds_db_name" {
+  description = "RDS database name"
+  value       = module.rds.db_name
+}
+
+output "rds_username" {
+  description = "RDS master username"
+  value       = module.rds.db_username
+}
+
+# =============================================================================
+# S3 OUTPUTS
+# =============================================================================
+output "raw_images_bucket_name" {
+  description = "S3 bucket for raw images"
+  value       = module.s3.raw_images_bucket_name
+}
+
+output "processed_images_bucket_name" {
+  description = "S3 bucket for processed images"
+  value       = module.s3.processed_images_bucket_name
+}
+
+# =============================================================================
 # ACCESS OUTPUTS
 # =============================================================================
 output "bastion_public_ip" {
@@ -58,8 +89,8 @@ output "bastion_public_ip" {
 # ENVIRONMENT INFO
 # =============================================================================
 output "environment" {
-  description = "Current Terraform workspace/environment"
-  value       = terraform.workspace
+  description = "Current environment"
+  value       = "aws"
 }
 
 output "region" {
@@ -77,7 +108,7 @@ output "quick_start_info" {
     🚀 AGROSYNCHRO INFRASTRUCTURE DEPLOYED
     =====================================
     
-    Environment: ${terraform.workspace}
+    Environment: aws
     Region: ${var.aws_region}
     
     🌐 Main API Endpoint:
@@ -92,7 +123,7 @@ output "quick_start_info" {
     🚀 Serverless Architecture Deployed!
     
     📚 Next steps:
-    ${terraform.workspace == "local" ? "1. Make sure LocalStack is running" : "1. Deploy containers to Fargate"}
+    1. Deploy containers to Fargate
     2. Deploy Fargate services
     3. Set up RDS database
     4. Configure S3 buckets

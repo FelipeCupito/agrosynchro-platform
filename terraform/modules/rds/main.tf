@@ -5,6 +5,9 @@
 # Incluye Secrets Manager para passwords
 # =============================================================================
 
+# Get current region
+data "aws_region" "current" {}
+
 # =============================================================================
 # SECRETS MANAGER
 # =============================================================================
@@ -55,8 +58,8 @@ resource "aws_security_group" "rds" {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-    description = "PostgreSQL access from VPC"
+    cidr_blocks = var.app_subnet_cidrs
+    description = "PostgreSQL access from application subnets only"
   }
 
   egress {
@@ -125,6 +128,9 @@ resource "aws_db_instance" "main" {
   backup_retention_period = var.backup_retention_period
   backup_window          = "03:00-04:00"
   maintenance_window     = "sun:04:00-sun:05:00"
+  
+  # Multi-AZ for high availability
+  multi_az = true
 
   skip_final_snapshot = var.skip_final_snapshot
   deletion_protection = var.deletion_protection
@@ -132,12 +138,9 @@ resource "aws_db_instance" "main" {
   # Enable automated backups for read replica
   copy_tags_to_snapshot = true
   
-  # Performance Insights
-  performance_insights_enabled = var.performance_insights_enabled
-  
-  # Monitoring
-  monitoring_interval = var.monitoring_interval
-  monitoring_role_arn = var.monitoring_interval > 0 ? aws_iam_role.rds_monitoring[0].arn : null
+  # Performance Insights and Enhanced Monitoring disabled for AWS Academy
+  performance_insights_enabled = false
+  monitoring_interval = 0
 
   # Enable logging
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
@@ -159,15 +162,18 @@ resource "aws_db_instance" "read_replica" {
   replicate_source_db       = aws_db_instance.main.identifier
   instance_class            = var.replica_instance_class
   auto_minor_version_upgrade = false
+  
+  # Ensure primary is available before creating replica
+  depends_on = [aws_db_instance.main]
+  
+  # Force read replica to different AZ than primary
+  availability_zone = aws_db_instance.main.availability_zone == "${data.aws_region.current.name}a" ? "${data.aws_region.current.name}b" : "${data.aws_region.current.name}a"
 
   vpc_security_group_ids = [aws_security_group.rds.id]
   
-  # Performance Insights
-  performance_insights_enabled = var.performance_insights_enabled
-  
-  # Monitoring
-  monitoring_interval = var.monitoring_interval
-  monitoring_role_arn = var.monitoring_interval > 0 ? aws_iam_role.rds_monitoring[0].arn : null
+  # Performance Insights and Enhanced Monitoring disabled for AWS Academy
+  performance_insights_enabled = false
+  monitoring_interval = 0
 
   skip_final_snapshot = true
 
@@ -178,49 +184,50 @@ resource "aws_db_instance" "read_replica" {
 }
 
 # =============================================================================
-# ENHANCED MONITORING IAM ROLE
+# ENHANCED MONITORING IAM ROLE - DISABLED FOR AWS ACADEMY
 # =============================================================================
-
-resource "aws_iam_role" "rds_monitoring" {
-  count = var.monitoring_interval > 0 ? 1 : 0
-  name  = "${var.project_name}-rds-monitoring-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "monitoring.rds.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "rds_monitoring" {
-  count      = var.monitoring_interval > 0 ? 1 : 0
-  role       = aws_iam_role.rds_monitoring[0].name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
-}
+# Enhanced Monitoring requires service-linked roles which may not be available in AWS Academy
+# resource "aws_iam_role" "rds_monitoring" {
+#   count = var.monitoring_interval > 0 ? 1 : 0
+#   name  = "${var.project_name}-rds-monitoring-role"
+#
+#   assume_role_policy = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [
+#       {
+#         Action = "sts:AssumeRole"
+#         Effect = "Allow"
+#         Principal = {
+#           Service = "monitoring.rds.amazonaws.com"
+#         }
+#       }
+#     ]
+#   })
+# }
+#
+# resource "aws_iam_role_policy_attachment" "rds_monitoring" {
+#   count      = var.monitoring_interval > 0 ? 1 : 0
+#   role       = aws_iam_role.rds_monitoring[0].name
+#   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+# }
 
 # =============================================================================
 # CLOUDWATCH LOG GROUPS
 # =============================================================================
 
-resource "aws_cloudwatch_log_group" "postgresql" {
-  name              = "/aws/rds/instance/${aws_db_instance.main.identifier}/postgresql"
-  retention_in_days = 14
-
-  lifecycle {
-    ignore_changes = [name]
-  }
-
-  tags = {
-    Name = "${var.project_name}-postgres-logs"
-  }
-}
+# CloudWatch Log Group - RDS creates this automatically
+# resource "aws_cloudwatch_log_group" "postgresql" {
+#   name              = "/aws/rds/instance/${aws_db_instance.main.identifier}/postgresql"
+#   retention_in_days = 14
+# 
+#   lifecycle {
+#     ignore_changes = [name]
+#   }
+# 
+#   tags = {
+#     Name = "${var.project_name}-postgres-logs"
+#   }
+# }
 
 resource "aws_cloudwatch_log_group" "upgrade" {
   name              = "/aws/rds/instance/${aws_db_instance.main.identifier}/upgrade"

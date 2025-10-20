@@ -12,7 +12,7 @@
 # Local variables
 locals {
   project_name = "agrosynchro"
-  environment  = terraform.workspace
+  environment  = "aws"
   region       = var.aws_region
   
   # Tags comunes para todos los recursos
@@ -34,6 +34,7 @@ module "networking" {
   vpc_cidr            = var.vpc_cidr_block
   public_subnet_cidrs = [var.public_subnet_1_cidr, var.public_subnet_2_cidr]
   private_subnet_cidrs = [var.private_subnet_1_cidr, var.private_subnet_2_cidr]
+  db_subnet_cidrs     = [var.db_subnet_1_cidr, var.db_subnet_2_cidr]
   availability_zones  = ["${local.region}a", "${local.region}b"]
 }
 
@@ -66,7 +67,7 @@ module "lambda" {
   environment              = local.environment
   lambda_role_arn          = module.s3.lambda_s3_role_arn
   raw_images_bucket_name   = module.s3.raw_images_bucket_name
-  # api_gateway_execution_arn = module.api_gateway.api_gateway_rest_api_execution_arn
+  api_gateway_execution_arn = module.api_gateway.api_gateway_rest_api_execution_arn
   
   depends_on = [module.s3]
 }
@@ -104,6 +105,7 @@ module "fargate" {
   vpc_id             = module.networking.vpc_id
   vpc_cidr           = var.vpc_cidr_block
   private_subnet_ids = module.networking.private_subnet_ids
+  db_subnet_cidrs    = [var.db_subnet_1_cidr, var.db_subnet_2_cidr]
   
   # SQS integration
   sqs_queue_url      = module.sqs.queue_url
@@ -125,7 +127,7 @@ module "fargate" {
 }
 
 # =============================================================================
-# RDS MODULE - Testing with LocalStack
+# RDS MODULE
 # =============================================================================
 module "rds" {
   source = "./modules/rds"
@@ -133,12 +135,13 @@ module "rds" {
   project_name       = local.project_name
   vpc_id            = module.networking.vpc_id
   vpc_cidr          = var.vpc_cidr_block
-  private_subnet_ids = module.networking.private_subnet_ids
+  private_subnet_ids = module.networking.database_subnet_ids
+  app_subnet_cidrs  = [var.private_subnet_1_cidr, var.private_subnet_2_cidr]
   db_username       = var.db_username
   db_password       = var.db_password
   
   # AWS settings
-  db_instance_class = local.environment == "local" ? "db.t3.micro" : "db.t3.small"
+  db_instance_class = "db.t3.small"
   create_read_replica = var.create_read_replica
 }
 

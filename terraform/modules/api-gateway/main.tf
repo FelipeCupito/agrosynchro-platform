@@ -1,3 +1,13 @@
+# CloudWatch Log Group disabled for AWS Academy compatibility
+# resource "aws_cloudwatch_log_group" "api_gateway" {
+#   name              = "/aws/apigateway/${var.project_name}"
+#   retention_in_days = 14
+#
+#   tags = {
+#     Name = "${var.project_name}-api-gateway-logs"
+#   }
+# }
+
 # API Gateway REST API
 resource "aws_api_gateway_rest_api" "main" {
   name        = "${var.project_name}-api"
@@ -220,7 +230,38 @@ resource "aws_api_gateway_stage" "main" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   stage_name    = var.stage_name
 
+  # CloudWatch logging disabled for AWS Academy (requires CloudWatch role setup)
+  # access_log_settings {
+  #   destination_arn = aws_cloudwatch_log_group.api_gateway.arn
+  #   format = jsonencode({
+  #     requestId      = "$context.requestId"
+  #     ip             = "$context.identity.sourceIp"
+  #     caller         = "$context.identity.caller"
+  #     user           = "$context.identity.user"
+  #     requestTime    = "$context.requestTime"
+  #     httpMethod     = "$context.httpMethod"
+  #     resourcePath   = "$context.resourcePath"
+  #     status         = "$context.status"
+  #     protocol       = "$context.protocol"
+  #     responseLength = "$context.responseLength"
+  #   })
+  # }
+
   tags = {
     Name = "${var.project_name}-${var.stage_name}"
+  }
+}
+
+# Method settings for throttling (logging disabled for AWS Academy)
+resource "aws_api_gateway_method_settings" "throttling" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  stage_name  = aws_api_gateway_stage.main.stage_name
+  method_path = "*/*"
+
+  settings {
+    throttling_rate_limit  = 100
+    throttling_burst_limit = 200
+    metrics_enabled       = true
+    # logging_level and data_trace_enabled disabled for AWS Academy
   }
 }

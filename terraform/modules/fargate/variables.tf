@@ -23,6 +23,11 @@ variable "private_subnet_ids" {
   type        = list(string)
 }
 
+variable "db_subnet_cidrs" {
+  description = "Database subnet CIDRs for security group access"
+  type        = list(string)
+}
+
 variable "sqs_queue_url" {
   description = "SQS queue URL"
   type        = string

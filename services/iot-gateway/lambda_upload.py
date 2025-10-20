@@ -133,7 +133,8 @@ def parse_multipart_data(body, content_type):
     # Extraer boundary del content-type
     boundary = None
     for part in content_type.split(';'):
-        if 'boundary=' in part:
+        part = part.strip()  # Limpiar espacios
+        if part.startswith('boundary='):
             boundary = part.split('boundary=')[1].strip()
             break
     
@@ -151,12 +152,12 @@ def parse_multipart_data(body, content_type):
     result = {}
     
     for part in parts:
-        if not part or part == b'--\\r\\n' or part == b'--':
+        if not part or part == b'--\r\n' or part == b'--':
             continue
             
         # Split headers y body
-        if b'\\r\\n\\r\\n' in part:
-            headers_section, body_section = part.split(b'\\r\\n\\r\\n', 1)
+        if b'\r\n\r\n' in part:
+            headers_section, body_section = part.split(b'\r\n\r\n', 1)
         else:
             continue
             
@@ -166,7 +167,7 @@ def parse_multipart_data(body, content_type):
         field_name = None
         filename = None
         
-        for line in headers_text.split('\\r\\n'):
+        for line in headers_text.split('\r\n'):
             if line.startswith('Content-Disposition'):
                 # Extraer name y filename
                 if 'name="' in line:
@@ -180,8 +181,8 @@ def parse_multipart_data(body, content_type):
                     filename = line[filename_start:filename_end]
         
         if field_name:
-            # Limpiar body (remover \\r\\n al final)
-            body_section = body_section.rstrip(b'\\r\\n')
+            # Limpiar body (remover \r\n al final)
+            body_section = body_section.rstrip(b'\r\n')
             
             if field_name == 'image':
                 result['image'] = body_section

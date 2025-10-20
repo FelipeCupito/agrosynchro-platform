@@ -33,7 +33,7 @@ resource "aws_subnet" "public" {
   }
 }
 
-# Private Subnets
+# Private Subnets (for applications)
 resource "aws_subnet" "private" {
   count = length(var.private_subnet_cidrs)
 
@@ -44,6 +44,22 @@ resource "aws_subnet" "private" {
   tags = {
     Name = "${var.project_name}-private-${count.index + 1}"
     Type = "Private"
+    Tier = "Application"
+  }
+}
+
+# Database Subnets (isolated)
+resource "aws_subnet" "database" {
+  count = length(var.db_subnet_cidrs)
+
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = var.db_subnet_cidrs[count.index]
+  availability_zone = var.availability_zones[count.index]
+
+  tags = {
+    Name = "${var.project_name}-database-${count.index + 1}"
+    Type = "Private"
+    Tier = "Database"
   }
 }
 
@@ -113,6 +129,25 @@ resource "aws_route_table_association" "private" {
 
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private[count.index].id
+}
+
+# Database Route Table (no internet access)
+resource "aws_route_table" "database" {
+  vpc_id = aws_vpc.main.id
+
+  # Only local VPC routes - no internet access for security
+  tags = {
+    Name = "${var.project_name}-database-rt"
+    Type = "Database"
+  }
+}
+
+# Database Route Table Associations
+resource "aws_route_table_association" "database" {
+  count = length(var.db_subnet_cidrs)
+
+  subnet_id      = aws_subnet.database[count.index].id
+  route_table_id = aws_route_table.database.id
 }
 
 # VPC Endpoint for S3

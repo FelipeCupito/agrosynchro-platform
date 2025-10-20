@@ -13,10 +13,11 @@
 resource "aws_ecs_cluster" "main" {
   name = "${var.project_name}-cluster"
 
-  setting {
-    name  = "containerInsights"
-    value = "enabled"
-  }
+  # Container Insights disabled for AWS Academy compatibility
+  # setting {
+  #   name  = "containerInsights"
+  #   value = "enabled"
+  # }
 
   tags = {
     Name = "${var.project_name}-ecs-cluster"
@@ -45,24 +46,27 @@ data "aws_iam_role" "task" {
 
 resource "aws_security_group" "fargate" {
   name        = "${var.project_name}-fargate-sg"
-  description = "Security group for Fargate tasks"
+  description = "Security group for Fargate processing tasks"
   vpc_id      = var.vpc_id
 
+  # Only outbound access needed (SQS, S3, RDS, ECR)
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  # Allow inbound HTTP for health checks
-  ingress {
-    from_port   = 8080
-    to_port     = 8080
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS access for AWS APIs"
   }
 
+  egress {
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = var.db_subnet_cidrs
+    description = "PostgreSQL access to database subnets"
+  }
+
+  # No ingress needed - processing engine only consumes from SQS
   tags = {
     Name = "${var.project_name}-fargate-sg"
   }
@@ -109,6 +113,12 @@ resource "aws_ecs_task_definition" "processing_engine" {
   memory                   = var.fargate_memory
   execution_role_arn       = data.aws_iam_role.task_execution.arn
   task_role_arn            = data.aws_iam_role.task.arn
+  
+  # Runtime platform for x86_64 compatibility
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
 
   container_definitions = jsonencode([
     {

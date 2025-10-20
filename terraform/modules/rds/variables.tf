@@ -18,6 +18,11 @@ variable "private_subnet_ids" {
   type        = list(string)
 }
 
+variable "app_subnet_cidrs" {
+  description = "Application subnet CIDRs for security group access"
+  type        = list(string)
+}
+
 variable "db_name" {
   description = "Database name"
   type        = string

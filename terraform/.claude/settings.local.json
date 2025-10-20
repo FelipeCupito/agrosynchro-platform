@@ -6,7 +6,17 @@
       "Read(//Users/felucupito/WorkSpace/agrosynchro/**)",
       "Bash(chmod:*)",
       "Bash(docker-compose:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(terraform output:*)",
+      "Bash(aws ec2 describe-vpcs:*)",
+      "Bash(aws logs describe-log-streams:*)",
+      "Bash(aws logs get-log-events:*)",
+      "Bash(zip:*)",
+      "Bash(aws lambda update-function-code:*)",
+      "Bash(aws lambda get-function:*)",
+      "Bash(aws s3 ls:*)",
+      "Bash(aws iam get-role-policy:*)",
+      "Bash(aws iam list-attached-role-policies:*)"
     ],
     "deny": [],
     "ask": []
