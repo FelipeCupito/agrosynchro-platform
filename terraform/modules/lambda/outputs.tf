@@ -55,6 +55,53 @@ output "lambda_reports_post_invoke_arn" {
   value       = aws_lambda_function.report_field.invoke_arn
 }
 
+# --- Function ARNs de las Lambdas API (para permisos de API Gateway) ---
+output "lambda_users_get_function_arn" {
+  description = "Function ARN for GET /users"
+  value       = aws_lambda_function.api.arn
+}
+
+output "lambda_users_post_function_arn" {
+  description = "Function ARN for POST /users"
+  value       = aws_lambda_function.users_post.arn
+}
+
+output "lambda_parameters_get_function_arn" {
+  description = "Function ARN for GET /parameters"
+  value       = aws_lambda_function.parameters_get.arn
+}
+
+output "lambda_parameters_post_function_arn" {
+  description = "Function ARN for POST /parameters"
+  value       = aws_lambda_function.parameters_post.arn
+}
+
+output "lambda_sensor_data_get_function_arn" {
+  description = "Function ARN for GET /sensor_data"
+  value       = aws_lambda_function.sensor_data_get.arn
+}
+
+output "lambda_reports_get_function_arn" {
+  description = "Function ARN for GET /reports"
+  value       = aws_lambda_function.reports_get.arn
+}
+
+output "lambda_reports_post_function_arn" {
+  description = "Function ARN for POST /reports"
+  value       = aws_lambda_function.report_field.arn
+}
+
+# --- Database initialization function ---
+output "lambda_init_db_function_arn" {
+  description = "Function ARN for database initialization"
+  value       = aws_lambda_function.init_db.arn
+}
+
+output "lambda_init_db_function_name" {
+  description = "Function name for database initialization"
+  value       = aws_lambda_function.init_db.function_name
+}
+
 # --- Info útil adicional ---
 output "lambda_security_group_id" {
   description = "Security group ID used by API Lambdas"

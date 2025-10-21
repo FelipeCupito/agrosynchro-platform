@@ -76,5 +76,5 @@ variable "aws_profile" {
 variable "create_read_replica" {
   description = "Whether to create RDS read replica"
   type        = bool
-  default     = true
+  default     = false
 }

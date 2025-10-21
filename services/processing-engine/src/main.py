@@ -148,9 +148,9 @@ def get_user_parameters(user_id):
         }
     return None
 
-def insert_sensor_data(user_id, measure, value, timestamp):
+def insert_sensor_data(user_id, timestamp, temperature, humidity, soil_moisture):
     try:
-        logger.info(f"🔄 Inserting sensor data: user_id={user_id}, measure={measure}, value={value}, timestamp={timestamp}")
+        logger.info(f"🔄 Inserting sensor data: user_id={user_id}, timestamp={timestamp}, temperature={temperature}, humidity={humidity}, soil_moisture={soil_moisture}")
         conn = psycopg2.connect(
             host=DB_HOST,
             port=DB_PORT,
@@ -160,8 +160,8 @@ def insert_sensor_data(user_id, measure, value, timestamp):
         )
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO sensor_data (user_id, timestamp, measure, value) VALUES (%s, %s, %s, %s)",
-            (user_id, timestamp, measure, value),
+            "INSERT INTO sensor_data (userid, timestamp, temp, hum, soil) VALUES (%s, %s, %s, %s, %s)",
+            (user_id, timestamp, temperature, humidity, soil_moisture),
         )
         conn.commit()
         conn.close()
@@ -208,30 +208,18 @@ def worker():
                         
                         user_id = payload.get("user_id")
                         timestamp = payload.get("timestamp", time.strftime("%Y-%m-%d %H:%M:%S"))
-                        
-                        # Handle both formats: single measure or measurements object
-                        if "measure" in payload and "value" in payload:
-                            # Single measurement format
-                            measure = payload.get("measure")
-                            value = payload.get("value")
-                            measurements = {measure: value}
-                        else:
-                            # Multiple measurements format
-                            measurements = payload.get("measurements", {})
+                        hum = payload.get("humidity")
+                        temp = payload.get("temperature")
+                        soil = payload.get("soil_moisture")
 
                         if not user_id:
                             logger.warning("No user_id in message, skipping")
                             continue
 
-                        if not measurements:
-                            logger.warning("No measurements in message, skipping")
-                            continue
+                        logger.info(f"💾 Saving sensor data for user {user_id}: temp={temp}, hum={hum}, soil={soil}")
 
-                        logger.info(f"💾 Saving sensor data for user {user_id}: {measurements}")
-
-                        for measurement, value in measurements.items():
-                            insert_sensor_data(user_id, measurement, value, timestamp)
-                            logger.info(f"✅ Saved sensor data: {measurement}={value} for user {user_id}")
+                        insert_sensor_data(user_id, timestamp, temp, hum, soil)
+                        logger.info(f"✅ Saved sensor data: for user {user_id}")
                         
                         # Delete message from queue after successful processing
                         sqs.delete_message(

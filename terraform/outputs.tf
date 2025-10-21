@@ -77,6 +77,16 @@ output "processed_images_bucket_name" {
   value       = module.s3.processed_images_bucket_name
 }
 
+output "frontend_bucket_name" {
+  description = "S3 bucket for frontend static files"
+  value       = module.s3.frontend_bucket_name
+}
+
+output "frontend_website_url" {
+  description = "Frontend website URL"
+  value       = "http://${module.s3.frontend_bucket_website_endpoint}"
+}
+
 # =============================================================================
 # FARGATE OUTPUTS
 # =============================================================================
@@ -142,4 +152,17 @@ output "quick_start_info" {
     4. Configure S3 buckets
     
     EOT
+}
+
+# =============================================================================
+# LAMBDA OUTPUTS
+# =============================================================================
+output "init_db_function_name" {
+  description = "Lambda function name for database initialization"
+  value       = module.lambda.lambda_init_db_function_name
+}
+
+output "init_db_function_arn" {
+  description = "Lambda function ARN for database initialization"
+  value       = module.lambda.lambda_init_db_function_arn
 }

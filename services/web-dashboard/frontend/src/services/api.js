@@ -1,14 +1,49 @@
 import axios from "axios";
 
-const API_URL = "http://load-balancer-agro-1197193656.us-east-1.elb.amazonaws.com:3000/api"; // ajustá al host correcto
+// Crear una instancia de axios con la configuración personalizada
+const axiosInstance = axios.create({
+  mode: 'no-cors',
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  }
+});
 
-export const getUsers = () => axios.get(`${API_URL}/users`);
-export const getSensorData = (userId) => axios.get(`${API_URL}/sensor_data?user_id=${userId}`);
-export const getParameters = (userId) => axios.get(`${API_URL}/parameters?user_id=${userId}`);
+const getApiUrl = () => {
+  console.log('window.ENV:', window.ENV);
+  return window.ENV?.API_URL || 'http://localhost:3000/api';
+
+  console.log('Using API URL from env.js:', window.ENV.API_URL);
+  return window.ENV.API_URL;
+};
+
+const API_URL = getApiUrl();
+console.log('Using API URL:', API_URL); // Para debug
+
+export const getUsers = () => axiosInstance.get(`${API_URL}/users`);
+export const getSensorData = (userId) => axiosInstance.get(`${API_URL}/sensor_data?user_id=${userId}`);
+export const getParameters = (userId) => axiosInstance.get(`${API_URL}/parameters?user_id=${userId}`);
 
 // Crear usuario
-export const createUser = (email) => axios.post(`${API_URL}/users`, { email:email, username:"test" });
+export const createUser = (email) => axiosInstance.post(`${API_URL}/users`, { mail: email, username:"test" });
 
 // Crear parámetros asociados a un usuario
-export const createParameters = (userId, parameters) =>
-  axios.post(`${API_URL}/parameters`, { user_id: userId, parameters });
+export const createParameters = (userId, parameters) => {
+  // Mapear el objeto anidado a los campos planos que espera el backend
+  return axiosInstance.post(`${API_URL}/parameters`, {
+    userid: userId,
+    min_temperature: parameters.temperature.min,
+    max_temperature: parameters.temperature.max,
+    min_humidity: parameters.humidity.min,
+    max_humidity: parameters.humidity.max,
+    min_soil_moisture: parameters.soil_moisture.min,
+    max_soil_moisture: parameters.soil_moisture.max
+  });
+};
+
+// Reportes
+export const getReports = (userId) => {
+  const url = userId ? `${API_URL}/reports?user_id=${userId}` : `${API_URL}/reports`;
+  return axiosInstance.get(url);
+};
+export const postReport = ({ userid, date }) => axiosInstance.post(`${API_URL}/reports?user_id=${userid}&date=${date}`);

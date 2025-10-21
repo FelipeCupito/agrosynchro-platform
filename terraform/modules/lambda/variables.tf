@@ -57,7 +57,7 @@ variable "lambda_runtime" {
 variable "package_dir" {
   description = "Local folder with Lambda source (for multi-function zip)"
   type        = string
-  default     = "${path.root}/lambda" //TODO: ajustar al nuevo path.
+  default     = "../services/lambda"
 }
 
 # --- VPC / Subnets para Lambdas que acceden a RDS ---

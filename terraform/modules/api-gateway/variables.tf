@@ -73,3 +73,39 @@ variable "lambda_reports_post_invoke_arn" {
   description = "Invoke ARN for POST /reports"
   type        = string
 }
+
+# Function ARNs for Lambda permissions
+variable "lambda_users_get_function_arn" {
+  description = "Function ARN for GET /users"
+  type        = string
+}
+
+variable "lambda_users_post_function_arn" {
+  description = "Function ARN for POST /users"
+  type        = string
+}
+
+variable "lambda_parameters_get_function_arn" {
+  description = "Function ARN for GET /parameters"
+  type        = string
+}
+
+variable "lambda_parameters_post_function_arn" {
+  description = "Function ARN for POST /parameters"
+  type        = string
+}
+
+variable "lambda_sensor_data_get_function_arn" {
+  description = "Function ARN for GET /sensor_data"
+  type        = string
+}
+
+variable "lambda_reports_get_function_arn" {
+  description = "Function ARN for GET /reports"
+  type        = string
+}
+
+variable "lambda_reports_post_function_arn" {
+  description = "Function ARN for POST /reports"
+  type        = string
+}

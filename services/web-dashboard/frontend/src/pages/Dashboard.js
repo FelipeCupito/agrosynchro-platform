@@ -6,7 +6,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from "recharts";
 
-const Dashboard = () => {
+const Dashboard = ({ setUserId }) => {
   const [email, setEmail] = useState("");
   const [user, setUser] = useState(null);
   const [avgData, setAvgData] = useState([]);
@@ -30,12 +30,13 @@ const Dashboard = () => {
     e.preventDefault();
     try {
       const usersRes = await getUsers();
-      const foundUser = usersRes.data.find((u) => u.email === email);
+      const foundUser = usersRes.data.data.find((u) => u.email === email);
       if (!foundUser) {
         alert("Usuario no encontrado");
         return;
       }
-      setUser(foundUser);
+  setUser(foundUser);
+  setUserId(foundUser.id);
 
       // Parámetros
       const paramRes = await getParameters(foundUser.id);
@@ -47,7 +48,7 @@ const Dashboard = () => {
 
       // Sensor data
       const sensorRes = await getSensorData(foundUser.id);
-      const sensorData = sensorRes.data;
+      const sensorData = sensorRes.data.data;
 
       // Promedios por medida
       const grouped = {};
@@ -110,7 +111,7 @@ const Dashboard = () => {
     try {
       // 1️⃣ Crear usuario
       const userRes = await createUser(newEmail);
-      const userId = userRes.data.id;
+      const userId = userRes.data.userid;
 
       // 2️⃣ Crear parámetros personalizados
       const customParams = {

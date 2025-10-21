@@ -44,16 +44,19 @@ output "processed_images_bucket_domain_name" {
   value       = aws_s3_bucket.processed_images.bucket_domain_name
 }
 
-# IAM Roles Outputs
+# IAM Roles Outputs - COMMENTED OUT FOR AWS ACADEMY LIMITATIONS
+# NOTE: These outputs are disabled because IAM role creation is restricted
+/*
 output "lambda_s3_role_arn" {
   description = "IAM role ARN for Lambda to access S3"
-  value       = data.aws_iam_role.lambda_s3_role.arn
+  value       = aws_iam_role.lambda_s3_role.arn
 }
 
 output "fargate_s3_role_arn" {
   description = "IAM role ARN for Fargate to access S3"
-  value       = data.aws_iam_role.fargate_s3_role.arn
+  value       = aws_iam_role.fargate_s3_role.arn
 }
+*/
 
 # Bucket URLs for easy access
 output "raw_images_bucket_url" {

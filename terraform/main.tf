@@ -2,6 +2,9 @@
 # AGROSYNCHRO INFRASTRUCTURE - MAIN CONFIGURATION
 # =============================================================================
 
+# Data sources
+data "aws_caller_identity" "current" {}
+
 # Local variables
 locals {
   project_name = "agrosynchro"
@@ -58,11 +61,23 @@ module "lambda" {
   
   project_name              = local.project_name
   environment              = local.environment
-  lambda_role_arn          = module.s3.lambda_s3_role_arn
+  region                   = local.region
+  lambda_role_arn          = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/LabRole"
   raw_images_bucket_name   = module.s3.raw_images_bucket_name
-  api_gateway_execution_arn = module.api_gateway.api_gateway_rest_api_execution_arn
+  api_gateway_execution_arn = ""  # Optional - can be set later if needed
   
-  depends_on = [module.s3]
+  # VPC configuration
+  vpc_id           = module.networking.vpc_id
+  private_subnets  = module.networking.private_subnet_ids
+  
+  # Database configuration
+  db_host     = split(":", module.rds.db_instance_endpoint)[0]
+  db_name     = module.rds.db_name
+  db_user     = var.db_username
+  db_password = var.db_password
+  db_port     = tostring(module.rds.db_port)
+  
+  depends_on = [module.s3, module.networking, module.rds]
 }
 
 # =============================================================================
@@ -80,7 +95,25 @@ module "api_gateway" {
   s3_bucket_name      = module.s3.raw_images_bucket_name
   lambda_invoke_arn   = module.lambda.lambda_invoke_arn
   
-  depends_on = [module.sqs]
+  # API Lambda function invoke ARNs
+  lambda_users_get_invoke_arn       = module.lambda.lambda_users_get_invoke_arn
+  lambda_users_post_invoke_arn      = module.lambda.lambda_users_post_invoke_arn
+  lambda_parameters_get_invoke_arn  = module.lambda.lambda_parameters_get_invoke_arn
+  lambda_parameters_post_invoke_arn = module.lambda.lambda_parameters_post_invoke_arn
+  lambda_sensor_data_get_invoke_arn = module.lambda.lambda_sensor_data_get_invoke_arn
+  lambda_reports_get_invoke_arn     = module.lambda.lambda_reports_get_invoke_arn
+  lambda_reports_post_invoke_arn    = module.lambda.lambda_reports_post_invoke_arn
+  
+  # API Lambda function ARNs for permissions
+  lambda_users_get_function_arn       = module.lambda.lambda_users_get_function_arn
+  lambda_users_post_function_arn      = module.lambda.lambda_users_post_function_arn
+  lambda_parameters_get_function_arn  = module.lambda.lambda_parameters_get_function_arn
+  lambda_parameters_post_function_arn = module.lambda.lambda_parameters_post_function_arn
+  lambda_sensor_data_get_function_arn = module.lambda.lambda_sensor_data_get_function_arn
+  lambda_reports_get_function_arn     = module.lambda.lambda_reports_get_function_arn
+  lambda_reports_post_function_arn    = module.lambda.lambda_reports_post_function_arn
+  
+  depends_on = [module.sqs, module.lambda]
 }
 
 # =============================================================================
@@ -133,4 +166,38 @@ module "rds" {
   # AWS settings
   db_instance_class = "db.t3.small"
   create_read_replica = var.create_read_replica
+}
+
+# =============================================================================
+# FRONTEND CONFIGURATION - DYNAMIC ENV.JS WITH API GATEWAY URL
+# =============================================================================
+
+# Generate dynamic env.js file with the correct API Gateway URL
+resource "aws_s3_object" "frontend_env_js" {
+  bucket       = module.s3.frontend_bucket_name
+  key          = "env.js"
+  content      = <<EOF
+window.ENV = {
+  API_URL: "${module.api_gateway.api_gateway_invoke_url}"
+};
+EOF
+  content_type = "application/javascript"
+  etag         = md5("${module.api_gateway.api_gateway_invoke_url}")
+  
+  depends_on = [module.api_gateway, module.s3]
+}
+
+# =============================================================================
+# SECURITY GROUP RULES FOR LAMBDA TO RDS COMMUNICATION
+# =============================================================================
+
+# Allow Lambda security group to access RDS on port 5432
+resource "aws_security_group_rule" "lambda_to_rds" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  source_security_group_id = module.lambda.lambda_security_group_id
+  security_group_id        = module.rds.security_group_id
+  description              = "Allow Lambda to access RDS PostgreSQL"
 }

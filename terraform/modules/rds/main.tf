@@ -41,7 +41,7 @@ resource "aws_security_group" "rds" {
     to_port     = 5432
     protocol    = "tcp"
     cidr_blocks = var.app_subnet_cidrs
-    description = "PostgreSQL access from application subnets only"
+    description = "PostgreSQL access from application subnets"
   }
 
   egress {

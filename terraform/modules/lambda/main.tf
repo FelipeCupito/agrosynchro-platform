@@ -244,6 +244,25 @@ resource "aws_lambda_function" "reports_get" {
   environment { variables = local.common_env }
 }
 
+# Lambda: init_db - Database initialization
+resource "aws_lambda_function" "init_db" {
+  function_name    = "${var.project_name}-init-db"
+  role             = var.lambda_role_arn
+  filename         = data.archive_file.lambda_app_zip.output_path
+  source_code_hash = data.archive_file.lambda_app_zip.output_base64sha256
+  handler          = "init_db.lambda_handler"
+  runtime          = var.lambda_runtime
+  timeout          = 60  # Longer timeout for database operations
+  memory_size      = var.lambda_memory_size
+
+  vpc_config {
+    subnet_ids         = var.private_subnets
+    security_group_ids = [aws_security_group.lambda_sg.id]
+  }
+
+  environment { variables = local.common_env }
+}
+
 # =============================================================================
 # Permisos para API Gateway -> Lambdas nuevas (dependen de var.api_gateway_execution_arn)
 # =============================================================================

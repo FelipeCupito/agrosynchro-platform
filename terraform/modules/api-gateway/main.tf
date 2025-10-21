@@ -518,12 +518,12 @@ resource "aws_api_gateway_integration_response" "reports_options_integration_res
 }
 
 # ----------------------------------------
-# Lambda permissions (usar ARN como function_name)
+# Lambda permissions (usar function ARN como function_name)
 # ----------------------------------------
 resource "aws_lambda_permission" "apigw_invoke_users_get" {
   statement_id  = "AllowAPIGatewayInvokeUsersGet"
   action        = "lambda:InvokeFunction"
-  function_name = var.lambda_users_get_invoke_arn
+  function_name = var.lambda_users_get_function_arn
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
@@ -531,7 +531,7 @@ resource "aws_lambda_permission" "apigw_invoke_users_get" {
 resource "aws_lambda_permission" "apigw_invoke_users_post" {
   statement_id  = "AllowAPIGatewayInvokeUsersPost"
   action        = "lambda:InvokeFunction"
-  function_name = var.lambda_users_post_invoke_arn
+  function_name = var.lambda_users_post_function_arn
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
@@ -539,7 +539,7 @@ resource "aws_lambda_permission" "apigw_invoke_users_post" {
 resource "aws_lambda_permission" "apigw_invoke_get_parameters" {
   statement_id  = "AllowAPIGatewayInvokeParametersGet"
   action        = "lambda:InvokeFunction"
-  function_name = var.lambda_parameters_get_invoke_arn
+  function_name = var.lambda_parameters_get_function_arn
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
@@ -547,7 +547,7 @@ resource "aws_lambda_permission" "apigw_invoke_get_parameters" {
 resource "aws_lambda_permission" "apigw_invoke_post_parameters" {
   statement_id  = "AllowAPIGatewayInvokeParametersPost"
   action        = "lambda:InvokeFunction"
-  function_name = var.lambda_parameters_post_invoke_arn
+  function_name = var.lambda_parameters_post_function_arn
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
@@ -555,7 +555,7 @@ resource "aws_lambda_permission" "apigw_invoke_post_parameters" {
 resource "aws_lambda_permission" "apigw_invoke_get_sensor_data" {
   statement_id  = "AllowAPIGatewayInvokeSensorDataGet"
   action        = "lambda:InvokeFunction"
-  function_name = var.lambda_sensor_data_get_invoke_arn
+  function_name = var.lambda_sensor_data_get_function_arn
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
@@ -563,7 +563,7 @@ resource "aws_lambda_permission" "apigw_invoke_get_sensor_data" {
 resource "aws_lambda_permission" "apigw_invoke_get_reports" {
   statement_id  = "AllowAPIGatewayInvokeReportsGet"
   action        = "lambda:InvokeFunction"
-  function_name = var.lambda_reports_get_invoke_arn
+  function_name = var.lambda_reports_get_function_arn
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
@@ -571,7 +571,7 @@ resource "aws_lambda_permission" "apigw_invoke_get_reports" {
 resource "aws_lambda_permission" "apigw_invoke_post_reports" {
   statement_id  = "AllowAPIGatewayInvokeReportsPost"
   action        = "lambda:InvokeFunction"
-  function_name = var.lambda_reports_post_invoke_arn
+  function_name = var.lambda_reports_post_function_arn
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
