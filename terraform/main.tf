@@ -203,8 +203,9 @@ module "cognito" {
     "${module.api_gateway.api_gateway_invoke_url}/callback"
   ]
   
-  # Logout URLs - Solo localhost por ahora (S3 website es HTTP y Cognito requiere HTTPS)
+  # Logout URLs - Solo localhost (S3 website es HTTP y Cognito requiere HTTPS)
   # Para producción, usar CloudFront con HTTPS o un custom domain
+  # Nota: Para deployment en AWS, el logout se maneja solo localmente (sin redirección a Cognito)
   logout_urls = [
     "http://localhost:3000/"
   ]

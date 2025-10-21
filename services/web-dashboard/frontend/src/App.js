@@ -7,6 +7,7 @@ import { login, logout, processOAuthCallback, isAuthenticated, getUserInfo } fro
 
 function App() {
   const [tab, setTab] = React.useState("dashboard");
+  // userId: corresponde al userid de la BD (entero), no al cognito_sub
   const [userId, setUserId] = React.useState("");
   const [auth, setAuth] = React.useState(isAuthenticated());
   const [userSynced, setUserSynced] = React.useState(false);
@@ -35,21 +36,32 @@ function App() {
       console.log('👤 Syncing user to DB:', userInfo);
 
       // Llama a POST /users para crear/actualizar el usuario en la BD
-      const apiUrl = window.ENV?.API_URL || 'https://a0ptztcgc8.execute-api.us-east-1.amazonaws.com/aws';
+      const apiUrl = window.ENV?.API_URL || 'http://localhost:3000';
       const response = await fetch(`${apiUrl}/users`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          mail: userInfo.email,
+          // Enviar ambos para asegurar upsert y obtener siempre el userid
+          email: userInfo.email,
+          cognito_sub: userInfo.sub,
+          name: userInfo.email?.split('@')[0] || 'user'
         }),
       });
 
       if (response.ok) {
         const data = await response.json();
         console.log('✅ User synced successfully:', data);
-        setUserId(userInfo.sub); // Usa el cognito_sub como userId
+        // La lambda retorna "userid" cuando recibe cognito_sub
+        if (data.userid) {
+          setUserId(String(data.userid));
+        } else if (data.data && data.data.userid) {
+          setUserId(String(data.data.userid));
+        } else {
+          console.warn('No userid in response, intentando fallback por GET /users');
+          // Fallback opcional: dejar userId vacío, la UI mostrará errores si falta
+        }
         setUserSynced(true);
       } else {
         console.error('❌ Error syncing user:', await response.text());
@@ -77,8 +89,8 @@ function App() {
         <span style={{ marginLeft: 16 }} />
         <button onClick={logout}>Logout</button>
       </nav>
-      {tab === "dashboard" && <Dashboard setUserId={setUserId} />}
-      {tab === "reports" && <Reports userId={userId} setUserId={setUserId} />}
+      {tab === "dashboard" && <Dashboard userId={userId} />}
+      {tab === "reports" && <Reports userId={userId} />}
     </div>
   );
 }

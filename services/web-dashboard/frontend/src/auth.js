@@ -137,13 +137,17 @@ export function logout() {
   localStorage.removeItem('refresh_token');
   localStorage.removeItem('token_expiration');
 
-  // Optional: redirect to Cognito logout
+  // Redirect to Cognito logout only for localhost (HTTPS required for production)
   const env = getEnv();
-  if (env.COGNITO_DOMAIN && env.COGNITO_CLIENT_ID) {
-    const logoutUri = window.location.origin;
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  
+  if (env.COGNITO_DOMAIN && env.COGNITO_CLIENT_ID && isLocalhost) {
+    // Solo redirigir a Cognito logout en localhost (tiene HTTPS exception)
+    const logoutUri = window.location.origin + '/';
     const url = `https://${env.COGNITO_DOMAIN}/logout?client_id=${encodeURIComponent(env.COGNITO_CLIENT_ID)}&logout_uri=${encodeURIComponent(logoutUri)}`;
     window.location.href = url;
   } else {
-    window.location.reload();
+    // Para producción (S3 website HTTP), solo limpiar tokens localmente y recargar
+    window.location.href = '/';
   }
 }

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { getReports, postReport } from "../services/api";
 
-const Reports = ({ userId, setUserId }) => {
+const Reports = ({ userId }) => {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -39,13 +39,6 @@ const Reports = ({ userId, setUserId }) => {
     <div style={{ padding: "2rem" }}>
       <h1>Reportes</h1>
       <div style={{ marginBottom: "1rem" }}>
-        <input
-          type="text"
-          placeholder="User ID"
-          value={userId}
-          onChange={e => setUserId(e.target.value)}
-          disabled={!!userId}
-        />
         <button onClick={handleGetTodayReport} disabled={!userId}>
           Obtener reporte de hoy
         </button>

@@ -25,8 +25,10 @@ def lambda_handler(event, context):
         conn = pg8000.connect(host=db_host, database=db_name, user=db_user, password=db_password, port=db_port)
         cur = conn.cursor()
 
-        # Actualizar tabla para soportar cognito_sub
-        cur.execute("""
+        # Asegurar esquema de la tabla users (migración non-destructive)
+        # 1) Crear si no existe con el esquema nuevo
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS users (
                 userid SERIAL PRIMARY KEY,
                 mail TEXT NOT NULL UNIQUE,
@@ -35,7 +37,16 @@ def lambda_handler(event, context):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
+            """
+        )
+
+        # 2) Si ya existía, agregar columnas que falten (por versiones previas)
+        cur.execute("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS cognito_sub TEXT;")
+        cur.execute("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS name TEXT;")
+        cur.execute("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+        cur.execute("ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+        # 3) Asegurar unicidad de cognito_sub con índice único (si no existe)
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_cognito_sub ON users(cognito_sub);")
 
         # Upsert: insertar si no existe, actualizar si existe
         if cognito_sub:
