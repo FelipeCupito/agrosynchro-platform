@@ -34,8 +34,42 @@ variable "s3_bucket_name" {
   type        = string
 }
 
-
 variable "lambda_invoke_arn" {
   description = "Lambda function invoke ARN for drone image processing"
+  type        = string
+}
+
+variable "lambda_users_get_invoke_arn" {
+  description = "Invoke ARN for GET /users"
+  type        = string
+}
+
+variable "lambda_users_post_invoke_arn" {
+  description = "Invoke ARN for POST /users"
+  type        = string
+}
+
+variable "lambda_parameters_get_invoke_arn" {
+  description = "Invoke ARN for GET /parameters"
+  type        = string
+}
+
+variable "lambda_parameters_post_invoke_arn" {
+  description = "Invoke ARN for POST /parameters"
+  type        = string
+}
+
+variable "lambda_sensor_data_get_invoke_arn" {
+  description = "Invoke ARN for GET /sensor_data"
+  type        = string
+}
+
+variable "lambda_reports_get_invoke_arn" {
+  description = "Invoke ARN for GET /reports"
+  type        = string
+}
+
+variable "lambda_reports_post_invoke_arn" {
+  description = "Invoke ARN for POST /reports"
   type        = string
 }

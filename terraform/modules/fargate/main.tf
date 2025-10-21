@@ -13,12 +13,6 @@
 resource "aws_ecs_cluster" "main" {
   name = "${var.project_name}-cluster"
 
-  # Container Insights disabled for AWS Academy compatibility
-  # setting {
-  #   name  = "containerInsights"
-  #   value = "enabled"
-  # }
-
   tags = {
     Name = "${var.project_name}-ecs-cluster"
   }
@@ -37,8 +31,6 @@ data "aws_iam_role" "task_execution" {
 data "aws_iam_role" "task" {
   name = "LabRole"
 }
-
-# Skip custom policies - LabRole has admin permissions
 
 # =============================================================================
 # SECURITY GROUP

@@ -1,13 +1,6 @@
 # =============================================================================
 # AGROSYNCHRO INFRASTRUCTURE - MAIN CONFIGURATION
 # =============================================================================
-# Esta configuración implementa la nueva arquitectura basada en:
-# - API Gateway (entrada principal)
-# - SQS (procesamiento asíncrono) 
-# - Fargate (contenedores sin servidor)
-# - RDS con Read Replica
-# - Múltiples buckets S3
-# =============================================================================
 
 # Local variables
 locals {
@@ -91,10 +84,6 @@ module "api_gateway" {
 }
 
 # =============================================================================
-# PLACEHOLDER MODULES (A completar)
-# =============================================================================
-
-# =============================================================================
 # FARGATE MODULE - AWS Real
 # =============================================================================
 module "fargate" {
@@ -145,13 +134,3 @@ module "rds" {
   db_instance_class = "db.t3.small"
   create_read_replica = var.create_read_replica
 }
-
-# S3 Module already implemented above
-
-# =============================================================================
-# BASTION HOST REMOVED - Not needed in serverless architecture
-# =============================================================================
-# Debugging ahora se hace con:
-# - CloudWatch Logs para Lambda/Fargate
-# - AWS Console para RDS/S3/SQS
-# - AWS CLI local para testing
