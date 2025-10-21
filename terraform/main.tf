@@ -77,6 +77,14 @@ module "lambda" {
   db_password = var.db_password
   db_port     = tostring(module.rds.db_port)
   
+  # Cognito configuration for callback Lambda
+  # Dejar vacío para evitar ciclo de dependencias (Lambda -> Cognito -> API Gateway -> Lambda)
+  # Actualizar manualmente después con: aws lambda update-function-configuration
+  cognito_domain    = ""
+  cognito_client_id = ""
+  # Frontend S3 static website URL (S3 website endpoints are HTTP-only)
+  frontend_url      = "http://${module.s3.frontend_bucket_name}.s3-website-${local.region}.amazonaws.com"
+  
   depends_on = [module.s3, module.networking, module.rds]
 }
 
@@ -112,6 +120,10 @@ module "api_gateway" {
   lambda_sensor_data_get_function_arn = module.lambda.lambda_sensor_data_get_function_arn
   lambda_reports_get_function_arn     = module.lambda.lambda_reports_get_function_arn
   lambda_reports_post_function_arn    = module.lambda.lambda_reports_post_function_arn
+  
+  # Cognito Callback Lambda
+  lambda_cognito_callback_invoke_arn   = module.lambda.lambda_cognito_callback_invoke_arn
+  lambda_cognito_callback_function_arn = module.lambda.lambda_cognito_callback_function_arn
   
   depends_on = [module.sqs, module.lambda]
 }
@@ -169,6 +181,40 @@ module "rds" {
 }
 
 # =============================================================================
+# COGNITO MODULE - User Authentication
+# =============================================================================
+
+# Random string para hacer el dominio de Cognito único
+resource "random_string" "cognito_domain" {
+  length  = 6
+  upper   = false
+  special = false
+}
+
+module "cognito" {
+  source = "./modules/cognito"
+  
+  project_name  = local.project_name
+  domain_prefix = random_string.cognito_domain.result
+  
+  # URLs del callback permitidas por Cognito (HTTPS excepto localhost)
+  callback_urls = [
+    "http://localhost:3000/callback",
+    "${module.api_gateway.api_gateway_invoke_url}/callback"
+  ]
+  
+  # Logout URLs - Solo localhost por ahora (S3 website es HTTP y Cognito requiere HTTPS)
+  # Para producción, usar CloudFront con HTTPS o un custom domain
+  logout_urls = [
+    "http://localhost:3000/"
+  ]
+  
+  # OAuth flows para aplicaciones web
+  oauth_flows  = ["code"]
+  oauth_scopes = ["email", "openid", "profile"]
+}
+
+# =============================================================================
 # FRONTEND CONFIGURATION - DYNAMIC ENV.JS WITH API GATEWAY URL
 # =============================================================================
 
@@ -178,13 +224,16 @@ resource "aws_s3_object" "frontend_env_js" {
   key          = "env.js"
   content      = <<EOF
 window.ENV = {
-  API_URL: "${module.api_gateway.api_gateway_invoke_url}"
+  API_URL: "${module.api_gateway.api_gateway_invoke_url}",
+  COGNITO_DOMAIN: "${module.cognito.domain}",
+  COGNITO_CLIENT_ID: "${module.cognito.user_pool_client_id}",
+  CALLBACK_URL: "${module.api_gateway.api_gateway_invoke_url}/callback"
 };
 EOF
   content_type = "application/javascript"
-  etag         = md5("${module.api_gateway.api_gateway_invoke_url}")
+  etag         = md5("${module.api_gateway.api_gateway_invoke_url}-${module.cognito.domain}-${module.cognito.user_pool_client_id}")
   
-  depends_on = [module.api_gateway, module.s3]
+  depends_on = [module.api_gateway, module.s3, module.cognito]
 }
 
 # =============================================================================

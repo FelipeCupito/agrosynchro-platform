@@ -576,6 +576,39 @@ resource "aws_lambda_permission" "apigw_invoke_post_reports" {
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
 
+# ----------------------------------------
+# /callback (Cognito OAuth redirect)
+# ----------------------------------------
+resource "aws_api_gateway_resource" "callback" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = data.aws_api_gateway_resource.root.id
+  path_part   = "callback"
+}
+
+resource "aws_api_gateway_method" "callback_get" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.callback.id
+  http_method   = "GET"
+  authorization = "NONE"  # OAuth callback no requiere autorización previa
+}
+
+resource "aws_api_gateway_integration" "lambda_callback" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.callback.id
+  http_method             = aws_api_gateway_method.callback_get.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.lambda_cognito_callback_invoke_arn
+}
+
+resource "aws_lambda_permission" "apigw_invoke_callback" {
+  statement_id  = "AllowAPIGatewayInvokeCallback"
+  action        = "lambda:InvokeFunction"
+  function_name = var.lambda_cognito_callback_function_arn
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
+}
+
 # =============================================================================
 # DEPLOYMENT (actualizado)
 # =============================================================================
@@ -597,7 +630,9 @@ resource "aws_api_gateway_deployment" "main" {
 
     aws_api_gateway_integration.lambda_get_reports,
     aws_api_gateway_integration.lambda_post_reports,
-    aws_api_gateway_integration.reports_options_integration
+    aws_api_gateway_integration.reports_options_integration,
+
+    aws_api_gateway_integration.lambda_callback
   ]
 
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -614,6 +649,11 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.messages.id,
       aws_api_gateway_method.messages_post.id,
       aws_api_gateway_integration.sqs_integration.id,
+
+      # callback
+      aws_api_gateway_resource.callback.id,
+      aws_api_gateway_method.callback_get.id,
+      aws_api_gateway_integration.lambda_callback.id,
 
       # drones
       aws_api_gateway_resource.api.id,

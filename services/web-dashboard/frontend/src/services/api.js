@@ -1,12 +1,22 @@
 import axios from "axios";
+import { getAccessToken } from "../auth";
 
 // Crear una instancia de axios con la configuración personalizada
 const axiosInstance = axios.create({
-  mode: 'no-cors',
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   }
+});
+
+// Attach Authorization header if access token exists
+axiosInstance.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 const getApiUrl = () => {

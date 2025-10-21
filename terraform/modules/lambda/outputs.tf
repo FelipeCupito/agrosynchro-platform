@@ -91,19 +91,36 @@ output "lambda_reports_post_function_arn" {
   value       = aws_lambda_function.report_field.arn
 }
 
-# --- Database initialization function ---
-output "lambda_init_db_function_arn" {
-  description = "Function ARN for database initialization"
-  value       = aws_lambda_function.init_db.arn
-}
+# --- Database initialization function (comentado: descomentar cuando RDS esté listo) ---
+# output "lambda_init_db_function_arn" {
+#   description = "Function ARN for database initialization"
+#   value       = aws_lambda_function.init_db.arn
+# }
 
-output "lambda_init_db_function_name" {
-  description = "Function name for database initialization"
-  value       = aws_lambda_function.init_db.function_name
-}
+# output "lambda_init_db_function_name" {
+#   description = "Function name for database initialization"
+#   value       = aws_lambda_function.init_db.function_name
+# }
 
 # --- Info útil adicional ---
 output "lambda_security_group_id" {
   description = "Security group ID used by API Lambdas"
   value       = aws_security_group.lambda_sg.id
 }
+
+# --- Cognito Callback Lambda ---
+output "lambda_cognito_callback_invoke_arn" {
+  description = "Invoke ARN for Cognito callback"
+  value       = aws_lambda_function.cognito_callback.invoke_arn
+}
+
+output "lambda_cognito_callback_function_arn" {
+  description = "Function ARN for Cognito callback"
+  value       = aws_lambda_function.cognito_callback.arn
+}
+
+output "lambda_cognito_callback_function_name" {
+  description = "Function name for Cognito callback"
+  value       = aws_lambda_function.cognito_callback.function_name
+}
+

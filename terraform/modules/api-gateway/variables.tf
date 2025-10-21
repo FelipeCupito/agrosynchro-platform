@@ -109,3 +109,15 @@ variable "lambda_reports_post_function_arn" {
   description = "Function ARN for POST /reports"
   type        = string
 }
+
+# Cognito Callback Lambda
+variable "lambda_cognito_callback_invoke_arn" {
+  description = "Invoke ARN for Cognito callback"
+  type        = string
+}
+
+variable "lambda_cognito_callback_function_arn" {
+  description = "Function ARN for Cognito callback"
+  type        = string
+}
+

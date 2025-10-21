@@ -374,7 +374,7 @@ output "frontend_bucket_name" {
 }
 
 output "frontend_bucket_website_endpoint" {
-  value       = aws_s3_bucket.frontend.website_endpoint
+  value       = aws_s3_bucket_website_configuration.frontend.website_endpoint
   description = "URL de hosting web estático del frontend"
 }
 

@@ -113,3 +113,23 @@ variable "report_field_memory_size" {
   type        = number
   default     = 1024
 }
+
+# --- Variables para Cognito Callback Lambda ---
+variable "cognito_domain" {
+  description = "Cognito User Pool domain (e.g., mydomain.auth.us-east-1.amazoncognito.com)"
+  type        = string
+  default     = ""
+}
+
+variable "cognito_client_id" {
+  description = "Cognito User Pool Client ID"
+  type        = string
+  default     = ""
+}
+
+variable "frontend_url" {
+  description = "Frontend URL for OAuth redirect after token exchange"
+  type        = string
+  default     = ""
+}
+

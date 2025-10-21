@@ -155,14 +155,14 @@ output "quick_start_info" {
 }
 
 # =============================================================================
-# LAMBDA OUTPUTS
+# COGNITO OUTPUTS
 # =============================================================================
-output "init_db_function_name" {
-  description = "Lambda function name for database initialization"
-  value       = module.lambda.lambda_init_db_function_name
+output "cognito_domain" {
+  description = "Cognito domain for Hosted UI"
+  value       = module.cognito.domain
 }
 
-output "init_db_function_arn" {
-  description = "Lambda function ARN for database initialization"
-  value       = module.lambda.lambda_init_db_function_arn
+output "cognito_client_id" {
+  description = "Cognito User Pool Client ID"
+  value       = module.cognito.user_pool_client_id
 }

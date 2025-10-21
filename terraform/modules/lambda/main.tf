@@ -329,3 +329,47 @@ resource "aws_lambda_permission" "apigw_reports_get" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${var.api_gateway_execution_arn}/*/*"
 }
+
+# =============================================================================
+# LAMBDA COGNITO CALLBACK
+# =============================================================================
+
+data "archive_file" "cognito_callback_zip" {
+  type        = "zip"
+  source_file = "${path.root}/../services/cognito-callback/callback.py"
+  output_path = "${path.module}/cognito_callback.zip"
+}
+
+resource "aws_cloudwatch_log_group" "cognito_callback_logs" {
+  name              = "/aws/lambda/${var.project_name}-cognito-callback"
+  retention_in_days = 14
+  tags = { Name = "${var.project_name}-cognito-callback-logs" }
+}
+
+resource "aws_lambda_function" "cognito_callback" {
+  filename         = data.archive_file.cognito_callback_zip.output_path
+  function_name    = "${var.project_name}-cognito-callback"
+  role             = var.lambda_role_arn
+  handler          = "callback.lambda_handler"
+  runtime          = "python3.11"
+  timeout          = 10
+  memory_size      = 128
+
+  source_code_hash = data.archive_file.cognito_callback_zip.output_base64sha256
+
+  environment {
+    variables = {
+      COGNITO_DOMAIN = var.cognito_domain
+      CLIENT_ID      = var.cognito_client_id
+      FRONTEND_URL   = var.frontend_url
+    }
+  }
+
+  tags = {
+    Name    = "${var.project_name}-cognito-callback"
+    Purpose = "oauth_callback_handler"
+  }
+}
+
+
+
