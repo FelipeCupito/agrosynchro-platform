@@ -38,7 +38,7 @@ def lambda_handler(event, context):
     db_user = os.environ.get("DB_USER", "postgres")
     db_password = os.environ.get("DB_PASSWORD")
     db_port = int(os.environ.get("DB_PORT", "5432"))
-    gemini_api_key = os.environ.get("GEMINI_API_KEY", "AIzaSyCEVXO1EnyGEQ-T56ThRJAOmsUAPul3GZ4")
+    gemini_api_key = os.environ.get("GEMINI_API_KEY", "<api_key_placeholder>")
 
     try:
         # Rango horario del día seleccionado
