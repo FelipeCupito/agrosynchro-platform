@@ -39,6 +39,11 @@ variable "lambda_invoke_arn" {
   type        = string
 }
 
+variable "lambda_function_arn" {
+  description = "Lambda function ARN for drone image processing permissions"
+  type        = string
+}
+
 variable "lambda_users_get_invoke_arn" {
   description = "Invoke ARN for GET /users"
   type        = string
@@ -110,6 +115,16 @@ variable "lambda_reports_post_function_arn" {
   type        = string
 }
 
+variable "lambda_drone_images_get_invoke_arn" {
+  description = "Invoke ARN for GET /images/analysis"
+  type        = string
+}
+
+variable "lambda_drone_images_get_function_arn" {
+  description = "Function ARN for GET /images/analysis"
+  type        = string
+}
+
 # Cognito Callback Lambda
 variable "lambda_cognito_callback_invoke_arn" {
   description = "Invoke ARN for Cognito callback"
@@ -120,4 +135,3 @@ variable "lambda_cognito_callback_function_arn" {
   description = "Function ARN for Cognito callback"
   type        = string
 }
-

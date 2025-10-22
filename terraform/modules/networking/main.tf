@@ -159,3 +159,14 @@ resource "aws_vpc_endpoint" "s3" {
     Name = "${var.project_name}-s3-endpoint"
   }
 }
+
+resource "aws_vpc_endpoint_route_table_association" "s3_private" {
+  count           = length(aws_route_table.private)
+  route_table_id  = aws_route_table.private[count.index].id
+  vpc_endpoint_id = aws_vpc_endpoint.s3.id
+}
+
+resource "aws_vpc_endpoint_route_table_association" "s3_database" {
+  route_table_id  = aws_route_table.database.id
+  vpc_endpoint_id = aws_vpc_endpoint.s3.id
+}

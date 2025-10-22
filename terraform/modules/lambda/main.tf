@@ -4,7 +4,7 @@
 
 data "archive_file" "lambda_upload_zip" {
   type        = "zip"
-  source_file = "${path.root}/../services/iot-gateway/lambda_upload.py"
+  source_dir  = "${path.root}/../services/lambda/image_upload"
   output_path = "${path.module}/lambda_function.zip"
 }
 
@@ -58,15 +58,7 @@ resource "aws_lambda_function_url" "drone_image_upload_url" {
   authorization_type = "NONE"
 }
 
-# Permiso para que API Gateway invoque la Lambda base (si se provee execution_arn)
-resource "aws_lambda_permission" "api_gateway_invoke_drone_image_upload" {
-  count         = var.api_gateway_execution_arn == "" ? 0 : 1
-  statement_id  = "AllowAPIGatewayInvokeDroneImageUpload"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.drone_image_upload.arn
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${var.api_gateway_execution_arn}/*/*"
-}
+# Drone image upload permission moved to API Gateway module to avoid circular dependencies
 
 # =============================================================================
 # LAMBDAS ADICIONALES (API, users_post, parameters_get/post, sensor_data_get, report_field, reports_get)
@@ -244,6 +236,25 @@ resource "aws_lambda_function" "reports_get" {
   environment { variables = local.common_env }
 }
 
+# Lambda: drone_images_get
+resource "aws_lambda_function" "drone_images_get" {
+  function_name    = "${var.project_name}-images-get"
+  role             = var.lambda_role_arn
+  filename         = data.archive_file.lambda_app_zip.output_path
+  source_code_hash = data.archive_file.lambda_app_zip.output_base64sha256
+  handler          = "drone_images_get.lambda_handler"
+  runtime          = var.lambda_runtime
+  timeout          = var.lambda_timeout
+  memory_size      = var.lambda_memory_size
+
+  vpc_config {
+    subnet_ids         = var.private_subnets
+    security_group_ids = [aws_security_group.lambda_sg.id]
+  }
+
+  environment { variables = local.common_env }
+}
+
 # Lambda: init_db - Database initialization
 resource "aws_lambda_function" "init_db" {
   function_name    = "${var.project_name}-init-db"
@@ -264,71 +275,10 @@ resource "aws_lambda_function" "init_db" {
 }
 
 # =============================================================================
-# Permisos para API Gateway -> Lambdas nuevas (dependen de var.api_gateway_execution_arn)
+# Lambda permissions moved to API Gateway module to avoid circular dependencies
+# The API Gateway module now handles all Lambda permissions since it has the 
+# required function ARNs and execution ARN
 # =============================================================================
-
-resource "aws_lambda_permission" "apigw_lambda" {
-  count         = var.api_gateway_execution_arn == "" ? 0 : 1
-  statement_id  = "AllowExecutionFromAPIGatewayApi"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api.arn
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${var.api_gateway_execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "apigw_users_post" {
-  count         = var.api_gateway_execution_arn == "" ? 0 : 1
-  statement_id  = "AllowExecutionFromAPIGatewayUsersPost"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.users_post.arn
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${var.api_gateway_execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "apigw_parameters_get" {
-  count         = var.api_gateway_execution_arn == "" ? 0 : 1
-  statement_id  = "AllowExecutionFromAPIGatewayParametersGet"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.parameters_get.arn
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${var.api_gateway_execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "apigw_parameters_post" {
-  count         = var.api_gateway_execution_arn == "" ? 0 : 1
-  statement_id  = "AllowExecutionFromAPIGatewayParametersPost"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.parameters_post.arn
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${var.api_gateway_execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "apigw_sensor_data_get" {
-  count         = var.api_gateway_execution_arn == "" ? 0 : 1
-  statement_id  = "AllowExecutionFromAPIGatewaySensorDataGet"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.sensor_data_get.arn
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${var.api_gateway_execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "apigw_report_field" {
-  count         = var.api_gateway_execution_arn == "" ? 0 : 1
-  statement_id  = "AllowExecutionFromAPIGatewayReportField"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.report_field.arn
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${var.api_gateway_execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "apigw_reports_get" {
-  count         = var.api_gateway_execution_arn == "" ? 0 : 1
-  statement_id  = "AllowExecutionFromAPIGatewayReportsGet"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.reports_get.arn
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${var.api_gateway_execution_arn}/*/*"
-}
 
 # =============================================================================
 # LAMBDA COGNITO CALLBACK
@@ -370,6 +320,4 @@ resource "aws_lambda_function" "cognito_callback" {
     Purpose = "oauth_callback_handler"
   }
 }
-
-
 

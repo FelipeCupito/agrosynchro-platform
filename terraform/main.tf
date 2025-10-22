@@ -102,6 +102,7 @@ module "api_gateway" {
   api_gateway_role_arn = module.sqs.api_gateway_role_arn
   s3_bucket_name      = module.s3.raw_images_bucket_name
   lambda_invoke_arn   = module.lambda.lambda_invoke_arn
+  lambda_function_arn = module.lambda.lambda_function_arn
   
   # API Lambda function invoke ARNs
   lambda_users_get_invoke_arn       = module.lambda.lambda_users_get_invoke_arn
@@ -120,6 +121,9 @@ module "api_gateway" {
   lambda_sensor_data_get_function_arn = module.lambda.lambda_sensor_data_get_function_arn
   lambda_reports_get_function_arn     = module.lambda.lambda_reports_get_function_arn
   lambda_reports_post_function_arn    = module.lambda.lambda_reports_post_function_arn
+
+  lambda_drone_images_get_invoke_arn   = module.lambda.lambda_drone_images_get_invoke_arn
+  lambda_drone_images_get_function_arn = module.lambda.lambda_drone_images_get_function_arn
   
   # Cognito Callback Lambda
   lambda_cognito_callback_invoke_arn   = module.lambda.lambda_cognito_callback_invoke_arn

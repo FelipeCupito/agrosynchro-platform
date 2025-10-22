@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
 AgroSynchro IoT Consumer
-Reads from Redis queue and sends email alerts when sensor data is abnormal
+Processes sensor data messages and drone image jobs from AWS services
 """
 
 import os
 import json
+import smtplib
 import threading
 import time
 import boto3
-import smtplib
-from email.mime.text import MIMEText
-from flask import Flask, jsonify, request
+import psycopg2
+from flask import Flask, jsonify
 from flask_cors import CORS
 from datetime import datetime
+from email.mime.text import MIMEText
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -38,12 +39,11 @@ DB_USER = os.getenv("DB_USER", "agro")
 DB_PASS = os.getenv("DB_PASSWORD", "agro12345")
 DB_NAME = os.getenv("DB_NAME", "agrodb")
 
-# Configuración SMTP SendGrid
+# Alert configuration (SMTP)
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 SMTP_USER = os.getenv("SMTP_USER", "partitba@gmail.com")
 SMTP_PASS = os.getenv("SMTP_PASS", "zsxp daba umvz kzar")
-
 ALERT_EMAIL = os.getenv("ALERT_EMAIL", "alertas@agrosynchro.com")
 
 # AWS clients
@@ -66,87 +66,108 @@ def get_aws_clients():
 
 
 # ---------------------
-# Mail sender
+# Worker thread
 # ---------------------
+worker_running = False
+
+def get_user_parameters(user_id):
+    """Retrieve threshold configuration and contact email for a user."""
+    conn = None
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            user=DB_USER,
+            password=DB_PASS,
+            dbname=DB_NAME
+        )
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT 
+                p.min_temperature, p.max_temperature,
+                p.min_humidity,    p.max_humidity,
+                p.min_soil_moisture, p.max_soil_moisture,
+                u.mail
+            FROM parameters p
+            JOIN users u ON p.userid = u.userid
+            WHERE p.userid = %s
+            """,
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        if not row:
+            return None
+        return {
+            "min_temperature": to_float(row[0]),
+            "max_temperature": to_float(row[1]),
+            "min_humidity": to_float(row[2]),
+            "max_humidity": to_float(row[3]),
+            "min_soil_moisture": to_float(row[4]),
+            "max_soil_moisture": to_float(row[5]),
+            "email": row[6],
+        }
+    except Exception as exc:
+        logger.error(f"Error fetching user parameters: {exc}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
 def send_email_alert(user_email, user_id, measurement, value, expected_range):
-    logger.info("sending mail to: " + user_email)
-    subject = f"⚠️ Alerta sensor {user_id}"
+    """Send alert email when sensor value exceeds configured thresholds."""
+    recipient = user_email or ALERT_EMAIL
+    if not recipient:
+        logger.warning("No email recipient available; skipping alert.")
+        return
+
+    subject = f"⚠️ Alerta de sensor para usuario {user_id}"
     body = (
-        f"El sensor {user_id} reportó un valor fuera de rango:\n\n"
+        f"El sensor del usuario {user_id} reportó un valor fuera de rango:\n\n"
         f"- Medición: {measurement}\n"
         f"- Valor recibido: {value}\n"
         f"- Rango esperado: {expected_range}\n\n"
         f"Hora: {datetime.now().isoformat()}"
     )
-    msg = MIMEText(body)
-    msg["Subject"] = subject
-    msg["From"] = SMTP_USER
-    msg["To"] = user_email
+    message = MIMEText(body)
+    message["Subject"] = subject
+    message["From"] = SMTP_USER
+    message["To"] = recipient
 
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_USER, [user_email], msg.as_string())
-        logger.info(f"Alert email sent to {user_email}")
-    except Exception as e:
-        logger.error(f"Failed to send email: {e}")
+            server.sendmail(SMTP_USER, [recipient], message.as_string())
+        logger.info(f"Alert email sent to {recipient}")
+    except Exception as exc:
+        logger.error(f"Failed to send alert email: {exc}")
 
 
-# ---------------------
-# Worker thread
-# ---------------------
-worker_thread = None
-worker_running = False
+def format_expected_range(min_value, max_value):
+    lower = min_value if min_value is not None else "-∞"
+    upper = max_value if max_value is not None else "∞"
+    return f"{lower} - {upper}"
 
 
-import psycopg2
+def is_out_of_range(value, min_value, max_value):
+    if value is None:
+        return False
+    if (min_value is not None) and value < min_value:
+        return True
+    if (max_value is not None) and value > max_value:
+        return True
+    return False
 
-from datetime import datetime
 
-# Database configuration now uses environment variables from top of file
+def to_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
-
-
-def get_user_parameters(user_id):
-    conn = psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        user=DB_USER,
-        password=DB_PASS,
-        dbname=DB_NAME
-    )
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        SELECT temperature, humidity, soil_moisture,
-               min_temperature, max_temperature,
-               min_humidity, max_humidity,
-               min_soil_moisture, max_soil_moisture,
-               email
-        FROM parameters
-        JOIN users ON parameters.user_id = users.id
-        WHERE user_id = %s
-        """,
-        (user_id,),
-    )
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {
-            "temperature": row[0],
-            "humidity": row[1],
-            "soil_moisture": row[2],
-            "min_temperature": row[3],
-            "max_temperature": row[4],
-            "min_humidity": row[5],
-            "max_humidity": row[6],
-            "min_soil_moisture": row[7],
-            "max_soil_moisture": row[8],
-            "email": row[9],
-        }
-    return None
 
 def insert_sensor_data(user_id, timestamp, temperature, humidity, soil_moisture):
     try:
@@ -206,20 +227,91 @@ def worker():
                         payload = json.loads(message['Body'])
                         logger.info(f"🔍 Processing sensor message: {payload}")
                         
-                        user_id = payload.get("user_id")
-                        timestamp = payload.get("timestamp", time.strftime("%Y-%m-%d %H:%M:%S"))
-                        hum = payload.get("humidity")
+                        user_id = payload.get("user_id") or payload.get("userid")
+                        measurements = payload.get("measurements") or {}
+                        timestamp = payload.get("timestamp") or measurements.get("timestamp") or time.strftime("%Y-%m-%d %H:%M:%S")
+
                         temp = payload.get("temperature")
+                        if temp is None:
+                            temp = measurements.get("temperature")
+
+                        hum = payload.get("humidity")
+                        if hum is None:
+                            hum = measurements.get("humidity")
+
                         soil = payload.get("soil_moisture")
+                        if soil is None:
+                            soil = measurements.get("soil_moisture")
+
+                        temp = to_float(temp)
+                        hum = to_float(hum)
+                        soil = to_float(soil)
 
                         if not user_id:
                             logger.warning("No user_id in message, skipping")
                             continue
+                        try:
+                            db_user_id = int(user_id)
+                        except (TypeError, ValueError):
+                            logger.error(f"Invalid user_id received: {user_id}")
+                            continue
 
-                        logger.info(f"💾 Saving sensor data for user {user_id}: temp={temp}, hum={hum}, soil={soil}")
+                        logger.info(f"💾 Saving sensor data for user {db_user_id}: temp={temp}, hum={hum}, soil={soil}")
 
-                        insert_sensor_data(user_id, timestamp, temp, hum, soil)
-                        logger.info(f"✅ Saved sensor data: for user {user_id}")
+                        insert_sensor_data(db_user_id, timestamp, temp, hum, soil)
+                        logger.info(f"✅ Saved sensor data: for user {db_user_id}")
+
+                        parameters = get_user_parameters(db_user_id)
+                        if parameters:
+                            recipient = parameters.get("email")
+
+                            if is_out_of_range(
+                                temp,
+                                parameters.get("min_temperature"),
+                                parameters.get("max_temperature"),
+                            ):
+                                send_email_alert(
+                                    recipient,
+                                    db_user_id,
+                                    "temperature",
+                                    temp,
+                                    format_expected_range(
+                                        parameters.get("min_temperature"),
+                                        parameters.get("max_temperature"),
+                                    ),
+                                )
+
+                            if is_out_of_range(
+                                hum,
+                                parameters.get("min_humidity"),
+                                parameters.get("max_humidity"),
+                            ):
+                                send_email_alert(
+                                    recipient,
+                                    db_user_id,
+                                    "humidity",
+                                    hum,
+                                    format_expected_range(
+                                        parameters.get("min_humidity"),
+                                        parameters.get("max_humidity"),
+                                    ),
+                                )
+
+                            if is_out_of_range(
+                                soil,
+                                parameters.get("min_soil_moisture"),
+                                parameters.get("max_soil_moisture"),
+                            ):
+                                send_email_alert(
+                                    recipient,
+                                    db_user_id,
+                                    "soil_moisture",
+                                    soil,
+                                    format_expected_range(
+                                        parameters.get("min_soil_moisture"),
+                                        parameters.get("max_soil_moisture"),
+                                    ),
+                                )
                         
                         # Delete message from queue after successful processing
                         sqs.delete_message(
@@ -245,27 +337,6 @@ def worker():
 # ---------------------
 # API endpoints
 # ---------------------
-@app.route("/api/start", methods=["POST"])
-def start_worker():
-    global worker_thread, worker_running
-    if worker_running:
-        return jsonify({"success": False, "message": "Worker already running"}), 400
-
-    worker_running = True
-    worker_thread = threading.Thread(target=worker, daemon=True)
-    worker_thread.start()
-    return jsonify({"success": True, "message": "Worker started"})
-
-
-@app.route("/api/stop", methods=["POST"])
-def stop_worker():
-    global worker_running
-    if not worker_running:
-        return jsonify({"success": False, "message": "Worker not running"}), 400
-    worker_running = False
-    return jsonify({"success": True, "message": "Worker stopping"})
-
-
 @app.route("/ping", methods=["GET"])
 def ping():
     return jsonify({"status": "ok", "service": "iot-consumer", "timestamp": datetime.now().isoformat()})
@@ -320,155 +391,6 @@ def health():
         }
     
     return jsonify(health_data)
-
-
-@app.route("/api/sensors/average", methods=["GET"])
-def get_sensor_averages():
-    """Get recent sensor data averages"""
-    try:
-        conn = psycopg2.connect(
-            host=DB_HOST, port=DB_PORT, user=DB_USER, 
-            password=DB_PASS, dbname=DB_NAME
-        )
-        cursor = conn.cursor()
-        
-        # Get last 5 minutes of data for averages
-        cursor.execute("""
-            SELECT measure, AVG(value) as avg_value, COUNT(*) as count
-            FROM sensor_data 
-            WHERE timestamp >= NOW() - INTERVAL '5 minutes'
-            GROUP BY measure
-        """)
-        
-        results = cursor.fetchall()
-        conn.close()
-        
-        averages = {}
-        sensors_count = 0
-        for measure, avg_value, count in results:
-            averages[measure] = round(float(avg_value), 2)
-            sensors_count += count
-        
-        return jsonify({
-            "success": True,
-            "data": {
-                "timestamp": datetime.now().isoformat(),
-                "sensors_count": sensors_count,
-                "averages": averages
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting sensor averages: {e}")
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-
-@app.route("/api/images/analysis", methods=["GET"])
-def get_image_analysis():
-    """Get recent image analysis results"""
-    try:
-        limit = request.args.get('limit', 10, type=int)
-        
-        conn = psycopg2.connect(
-            host=DB_HOST, port=DB_PORT, user=DB_USER, 
-            password=DB_PASS, dbname=DB_NAME
-        )
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT drone_id, raw_s3_key, processed_s3_key, field_status, 
-                   analysis_confidence, analyzed_at, processed_at
-            FROM drone_images 
-            WHERE analyzed_at IS NOT NULL
-            ORDER BY analyzed_at DESC 
-            LIMIT %s
-        """, (limit,))
-        
-        results = cursor.fetchall()
-        conn.close()
-        
-        analyses = []
-        for row in results:
-            analyses.append({
-                "drone_id": row[0],
-                "raw_s3_key": row[1],
-                "processed_s3_key": row[2],
-                "field_status": row[3],
-                "analysis_confidence": float(row[4]) if row[4] else 0.0,
-                "analyzed_at": row[5].isoformat() if row[5] else None,
-                "processed_at": row[6].isoformat() if row[6] else None
-            })
-        
-        return jsonify({
-            "success": True,
-            "data": analyses,
-            "count": len(analyses)
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting image analysis: {e}")
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
-
-@app.route("/api/sensors/data", methods=["GET"])
-def get_sensor_data():
-    """Get recent sensor data for debugging/testing"""
-    try:
-        limit = request.args.get('limit', 20, type=int)
-        user_id = request.args.get('user_id', None)
-        
-        conn = psycopg2.connect(
-            host=DB_HOST, port=DB_PORT, user=DB_USER, 
-            password=DB_PASS, dbname=DB_NAME
-        )
-        cursor = conn.cursor()
-        
-        if user_id:
-            cursor.execute("""
-                SELECT user_id, timestamp, measure, value
-                FROM sensor_data 
-                WHERE user_id = %s
-                ORDER BY timestamp DESC 
-                LIMIT %s
-            """, (user_id, limit))
-        else:
-            cursor.execute("""
-                SELECT user_id, timestamp, measure, value
-                FROM sensor_data 
-                ORDER BY timestamp DESC 
-                LIMIT %s
-            """, (limit,))
-        
-        results = cursor.fetchall()
-        conn.close()
-        
-        data = []
-        for row in results:
-            data.append({
-                "user_id": row[0],
-                "timestamp": row[1].isoformat() if row[1] else None,
-                "measure": row[2],
-                "value": float(row[3]) if row[3] else 0.0
-            })
-        
-        return jsonify({
-            "success": True,
-            "data": data,
-            "count": len(data)
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting sensor data: {e}")
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
 
 
 # ---------------------
@@ -665,23 +587,42 @@ def run_startup_migrations():
         )
         cursor = conn.cursor()
         
-        logger.info("Creating users table...")
+        logger.info("Ensuring users table schema...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username TEXT NOT NULL,
-                email TEXT NOT NULL
+                userid SERIAL PRIMARY KEY,
+                mail TEXT NOT NULL UNIQUE,
+                cognito_sub TEXT UNIQUE,
+                name TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
-        logger.info("Creating parameters table...")
+        cursor.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'id'
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'userid'
+                ) THEN
+                    EXECUTE 'ALTER TABLE users RENAME COLUMN id TO userid';
+                END IF;
+            END
+            $$;
+        """)
+        cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS cognito_sub TEXT UNIQUE;")
+        cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;")
+        cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+        cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+
+        logger.info("Ensuring parameters table schema...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS parameters (
                 id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                temperature REAL,
-                humidity REAL,
-                soil_moisture REAL,
+                userid INTEGER NOT NULL REFERENCES users(userid),
                 min_temperature REAL,
                 max_temperature REAL,
                 min_humidity REAL,
@@ -690,16 +631,47 @@ def run_startup_migrations():
                 max_soil_moisture REAL
             )
         """)
-        
-        logger.info("Creating sensor_data table...")
+        cursor.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'parameters' AND column_name = 'user_id'
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'parameters' AND column_name = 'userid'
+                ) THEN
+                    EXECUTE 'ALTER TABLE parameters RENAME COLUMN user_id TO userid';
+                END IF;
+            END
+            $$;
+        """)
+        cursor.execute("ALTER TABLE parameters ADD CONSTRAINT IF NOT EXISTS uq_parameters_userid UNIQUE (userid);")
+
+        logger.info("Ensuring sensor_data table schema...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sensor_data (
                 id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
+                userid INTEGER NOT NULL REFERENCES users(userid),
                 timestamp TIMESTAMP NOT NULL,
                 measure TEXT NOT NULL,
                 value REAL NOT NULL
             )
+        """)
+        cursor.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'sensor_data' AND column_name = 'user_id'
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'sensor_data' AND column_name = 'userid'
+                ) THEN
+                    EXECUTE 'ALTER TABLE sensor_data RENAME COLUMN user_id TO userid';
+                END IF;
+            END
+            $$;
         """)
         
         logger.info("Creating drone_images table...")

@@ -4,50 +4,51 @@
 
 ### Current Implementation (Serverless AWS)
 ```
-[IoT Sensors/Drones] → [API Gateway] → [SQS Queue] → [Fargate Processing] → [RDS PostgreSQL]
-                            ↓              ↓               ↓                    ↓
-                       [Lambda Upload] → [S3 Storage] → [AI Analysis] → [ALB Dashboard]
-                                                           ↓
-                                                    [Frontend (S3)]
+📡 DATA INGESTION:
+[IoT Sensors] → [API Gateway /messages] → [SQS Queue] → [Fargate Processing] → [RDS PostgreSQL]
+[Drone Images] → [API Gateway /api/drones/image] → [Lambda Upload] → [S3 Storage] → [Fargate AI Analysis] → [RDS PostgreSQL]
+
+📱 USER QUERIES:
+[Frontend (S3)] → [API Gateway /users, /parameters, /sensor_data, /reports] → [Lambda Functions] → [RDS PostgreSQL]
 ```
 
 ### Service Separation
 ```
-📱 External Data Ingestion:
-   API Gateway ← IoT Sensors, Drones, External APIs
+📡 Data Ingestion (Sensors/Drones → Database):
+   API Gateway → SQS/Lambda → Fargate/S3 → RDS
 
-🎯 Internal Dashboard & Analytics:  
-   ALB ← Frontend, Management, Reports
+📱 User Queries (Frontend → Database):  
+   API Gateway → Lambda Functions → RDS
 ```
 
 ## AWS Services & Endpoints
 
-### External Data Ingestion (API Gateway)
+### Data Ingestion Endpoints (API Gateway)
 | Endpoint | Method | Purpose | Authentication |
 |----------|--------|---------|---------------|
 | `/ping` | GET | Health check | None |
 | `/messages` | POST | IoT sensor data ingestion | None (will add Cognito) |
 | `/api/drones/image` | POST | Drone image upload | None (will add Cognito) |
 
-### Internal Dashboard Backend (Application Load Balancer)
-| Endpoint | Method | Purpose | Port |
-|----------|--------|---------|------|
-| `/health` | GET | Database connectivity check | 80 |
-| `/api/sensors/average` | GET | Real-time sensor averages | 80 |
-| `/api/images/analysis` | GET | Image analysis results | 80 |
-| `/api/alerts/configure` | POST | Configure sensor alerts | 80 |
-| `/api/alerts` | GET | Get active alerts | 80 |
+### User Query Endpoints (API Gateway → Lambda)
+| Endpoint | Method | Purpose | Authentication |
+|----------|--------|---------|---------------|
+| `/users` | GET, POST | User management | Cognito |
+| `/parameters` | GET, POST | User parameter configuration | Cognito |
+| `/sensor_data` | GET | Retrieve sensor data | Cognito |
+| `/reports` | GET, POST | Generate and retrieve reports | Cognito |
+| `/callback` | GET | Cognito OAuth callback | None |
 
 ### AWS Infrastructure Services
 | Service | Purpose | Configuration |
 |---------|---------|---------------|
-| **API Gateway** | External data ingestion | Regional, throttling enabled |
-| **Application Load Balancer** | Dashboard backend routing | Public, health checks |
-| **ECS Fargate** | Processing engine containers | Auto-scaling 1-10 instances |
+| **API Gateway** | Unified API endpoint for data ingestion and user queries | Regional, throttling enabled, Cognito auth |
+| **Lambda Functions** | User query processing (users, parameters, sensor_data, reports) | VPC-enabled, RDS access |
+| **ECS Fargate** | Sensor/image processing engine | Auto-scaling 1-10 instances |
 | **RDS PostgreSQL** | Data persistence | Multi-AZ, encrypted |
-| **SQS + DLQ** | Message queuing | Encryption, dead letter handling |
-| **S3 Buckets** | Image storage | Versioning, lifecycle policies |
-| **Lambda** | Image upload processing | Triggered by API Gateway |
+| **SQS + DLQ** | Message queuing for sensor data | Encryption, dead letter handling |
+| **S3 Buckets** | Image storage and frontend hosting | Versioning, lifecycle policies |
+| **Cognito** | User authentication and authorization | OAuth2, PKCE flow |
 
 ## Message Queue Schemas (AWS SQS)
 
@@ -91,13 +92,12 @@
 }
 ```
 
-## Processing Engine API (ALB + Fargate)
+## API Gateway Endpoints
 
-### Base URLs:
-- **ALB Backend**: `http://{alb-dns-name}/` - Dashboard APIs
-- **API Gateway**: `https://{api-gateway-url}/` - Data ingestion
+### Base URL:
+- **API Gateway**: `https://{api-gateway-url}/{stage}/` - Unified endpoint for all operations
 
-### ALB Dashboard Endpoints
+### User Query Lambda Endpoints
 
 ### Health Endpoint
 

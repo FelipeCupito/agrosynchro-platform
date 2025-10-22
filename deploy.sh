@@ -209,26 +209,100 @@ display_summary() {
     echo -e "${NC}"
     
     # Display key outputs
+    API_URL=$(terraform output -raw api_gateway_invoke_url 2>/dev/null || echo "")
+    FRONTEND_URL=$(terraform output -raw frontend_website_url 2>/dev/null || echo "")
+    COGNITO_DOMAIN=$(terraform output -raw cognito_domain 2>/dev/null || echo "")
+    COGNITO_CLIENT_ID=$(terraform output -raw cognito_client_id 2>/dev/null || echo "")
+    PROCESSED_BUCKET=$(terraform output -raw processed_images_bucket_name 2>/dev/null || echo "")
+    RAW_BUCKET=$(terraform output -raw raw_images_bucket_name 2>/dev/null || echo "")
+    SQS_URL=$(terraform output -raw sqs_queue_url 2>/dev/null || echo "")
+    SQS_DLQ_URL=$(terraform output -raw sqs_dlq_url 2>/dev/null || echo "")
+    RDS_ENDPOINT=$(terraform output -raw rds_endpoint 2>/dev/null || echo "")
+    RDS_DB_NAME=$(terraform output -raw rds_db_name 2>/dev/null || echo "")
+    RDS_USER=$(terraform output -raw rds_username 2>/dev/null || echo "")
+    
     echo -e "${CYAN}🌐 API Gateway URL:${NC}"
-    terraform output api_gateway_invoke_url 2>/dev/null || echo "  Could not retrieve API URL"
+    if [ -n "$API_URL" ]; then
+        echo "  $API_URL"
+    else
+        echo "  Could not retrieve API URL"
+    fi
+    
+    echo -e "${CYAN}🖥️ Frontend (S3 Static Site):${NC}"
+    if [ -n "$FRONTEND_URL" ]; then
+        echo "  $FRONTEND_URL"
+    else
+        echo "  Frontend URL not available"
+    fi
     
     echo -e "${CYAN}📋 Available Endpoints:${NC}"
-    API_URL=$(terraform output -raw api_gateway_invoke_url 2>/dev/null)
-    if [ ! -z "$API_URL" ]; then
+    if [ -n "$API_URL" ]; then
         echo "  • Health check: GET $API_URL/ping"
-        echo "  • Send message: POST $API_URL/messages"
-        echo "  • Upload image: POST $API_URL/api/drones/image"
+        echo "  • Sensor ingest: POST $API_URL/messages"
+        echo "  • Image upload: POST $API_URL/api/drones/image"
+        echo "  • Image analysis: GET $API_URL/images/analysis"
+        echo "  • Sensor data: GET $API_URL/sensor_data?user_id=<id>"
+        echo "  • Parameters: POST/GET $API_URL/parameters"
+        echo "  • Reports: GET/POST $API_URL/reports"
+        echo "  • Cognito callback: GET $API_URL/callback"
     fi
+    
+    echo -e "${CYAN}🔐 Cognito Hosted UI:${NC}"
+    if [ -n "$COGNITO_DOMAIN" ] && [ -n "$COGNITO_CLIENT_ID" ]; then
+        echo "  • Hosted UI: https://$COGNITO_DOMAIN/login?client_id=$COGNITO_CLIENT_ID&response_type=code&scope=email+openid+profile&redirect_uri=${API_URL}/callback"
+        echo "  • Domain: $COGNITO_DOMAIN"
+        echo "  • Client ID: $COGNITO_CLIENT_ID"
+    else
+        echo "  Cognito outputs not available"
+    fi
+    
+    echo -e "${CYAN}💾 Storage Buckets:${NC}"
+    if [ -n "$RAW_BUCKET" ]; then
+        echo "  • Raw images (cache): $RAW_BUCKET"
+    else
+        echo "  • Raw images bucket not available"
+    fi
+    if [ -n "$PROCESSED_BUCKET" ]; then
+        echo "  • Processed images (archived): $PROCESSED_BUCKET"
+    else
+        echo "  • Processed images bucket not available"
+    fi
+    terraform output frontend_bucket_name 2>/dev/null | sed 's/^/  • Frontend bucket: /'
     
     echo -e "${CYAN}🔧 Infrastructure:${NC}"
     terraform output environment 2>/dev/null | sed 's/^/  • Environment: /'
     terraform output region 2>/dev/null | sed 's/^/  • Region: /'
     
+    echo -e "${CYAN}📬 Messaging:${NC}"
+    if [ -n "$SQS_URL" ]; then
+        echo "  • Queue: $SQS_URL"
+    else
+        echo "  • Queue URL not available"
+    fi
+    if [ -n "$SQS_DLQ_URL" ]; then
+        echo "  • DLQ: $SQS_DLQ_URL"
+    else
+        echo "  • DLQ URL not available"
+    fi
+    
+    echo -e "${CYAN}🗄️ Database:${NC}"
+    if [ -n "$RDS_ENDPOINT" ]; then
+        echo "  • Endpoint: $RDS_ENDPOINT"
+    else
+        echo "  • Endpoint not available"
+    fi
+    if [ -n "$RDS_DB_NAME" ]; then
+        echo "  • DB Name: $RDS_DB_NAME"
+    fi
+    if [ -n "$RDS_USER" ]; then
+        echo "  • DB User: $RDS_USER"
+    fi
+    
     echo -e "${CYAN}📚 Next Steps:${NC}"
-    echo "  • Test endpoints using curl commands in README.md"
-    echo "  • Monitor logs in AWS CloudWatch"
-    echo "  • Check Fargate service status in AWS Console"
-    echo "  • Set up monitoring and alerting as needed"
+    echo "  • Ejecuta ./test-e2e.sh para validar todos los flujos"
+    echo "  • Monitorea logs en CloudWatch (Lambdas y Fargate)"
+    echo "  • Revisa métricas en SQS, RDS y S3"
+    echo "  • Configura alertas/observabilidad según tu operación"
     
     echo -e "${YELLOW}⚠️  Remember:${NC}"
     echo "  • Resources are running in AWS and may incur costs"

@@ -3,6 +3,45 @@ import os
 import pg8000
 from cors_headers import add_cors_headers
 
+
+def ensure_schema(cur):
+    """Ensure legacy column names are available for compatibility."""
+    cur.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'id'
+            ) AND NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'userid'
+            ) THEN
+                EXECUTE 'ALTER TABLE users RENAME COLUMN id TO userid';
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'mail'
+            ) THEN
+                EXECUTE 'ALTER TABLE users ADD COLUMN mail TEXT';
+            END IF;
+
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'users' AND column_name = 'email'
+            ) THEN
+                EXECUTE 'UPDATE users SET mail = email WHERE mail IS NULL';
+            END IF;
+        EXCEPTION
+            WHEN duplicate_column THEN NULL;
+            WHEN undefined_table THEN NULL;
+        END;
+        $$;
+        """
+    )
+
+
 def lambda_handler(event, context):
     # Debug: Imprimir el evento recibido
     print("Evento recibido:", json.dumps(event))
@@ -34,13 +73,17 @@ def lambda_handler(event, context):
             port=int(db_port),
         )
         cur = conn.cursor()
-        
+
+        # Ensure schema compatibility before querying
+        ensure_schema(cur)
+        conn.commit()
+
         # Ejecutar consulta
         cur.execute('SELECT userid, mail FROM users ORDER BY userid;')
         rows = cur.fetchall()
         
         # Convertir los resultados a una lista de diccionarios para mejor serialización
-        results = [{"id": row[0], "email": row[1]} for row in rows]
+        results = [{"userid": row[0], "mail": row[1]} for row in rows]
         
         # Cerrar conexión
         cur.close()

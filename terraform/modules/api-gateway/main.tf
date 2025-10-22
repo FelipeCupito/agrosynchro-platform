@@ -575,6 +575,106 @@ resource "aws_api_gateway_integration_response" "reports_options_integration_res
 }
 
 # ----------------------------------------
+# Drone image analysis resource /images/analysis -> Lambda
+# ----------------------------------------
+resource "aws_api_gateway_resource" "images" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = data.aws_api_gateway_resource.root.id
+  path_part   = "images"
+}
+
+resource "aws_api_gateway_resource" "images_analysis" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.images.id
+  path_part   = "analysis"
+}
+
+resource "aws_api_gateway_method" "images_analysis_get" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.images_analysis.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_method" "images_analysis_options" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.images_analysis.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "lambda_get_images_analysis" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.images_analysis.id
+  http_method             = aws_api_gateway_method.images_analysis_get.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.lambda_drone_images_get_invoke_arn
+}
+
+resource "aws_api_gateway_integration" "images_analysis_options_integration" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.images_analysis.id
+  http_method = aws_api_gateway_method.images_analysis_options.http_method
+  type        = "MOCK"
+  request_templates = {
+    "application/json" = "{ \"statusCode\": 200 }"
+  }
+}
+
+resource "aws_api_gateway_method_response" "images_analysis_options_200" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.images_analysis.id
+  http_method = aws_api_gateway_method.images_analysis_options.http_method
+  status_code = "200"
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers"     = true,
+    "method.response.header.Access-Control-Allow-Methods"     = true,
+    "method.response.header.Access-Control-Allow-Origin"      = true,
+    "method.response.header.Access-Control-Allow-Credentials" = true
+  }
+}
+
+resource "aws_api_gateway_method_response" "images_analysis_get_200" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.images_analysis.id
+  http_method = aws_api_gateway_method.images_analysis_get.http_method
+  status_code = "200"
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers"     = true,
+    "method.response.header.Access-Control-Allow-Methods"     = true,
+    "method.response.header.Access-Control-Allow-Origin"      = true,
+    "method.response.header.Access-Control-Allow-Credentials" = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "images_analysis_options_integration_response" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.images_analysis.id
+  http_method = aws_api_gateway_method.images_analysis_options.http_method
+  status_code = aws_api_gateway_method_response.images_analysis_options_200.status_code
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+    "method.response.header.Access-Control-Allow-Methods"     = "'GET,OPTIONS'",
+    "method.response.header.Access-Control-Allow-Origin"      = "'*'",
+    "method.response.header.Access-Control-Allow-Credentials" = "'true'"
+  }
+}
+
+resource "aws_api_gateway_integration_response" "images_analysis_get_integration_response" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.images_analysis.id
+  http_method = aws_api_gateway_method.images_analysis_get.http_method
+  status_code = aws_api_gateway_method_response.images_analysis_get_200.status_code
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+    "method.response.header.Access-Control-Allow-Methods"     = "'GET,OPTIONS'",
+    "method.response.header.Access-Control-Allow-Origin"      = "'*'",
+    "method.response.header.Access-Control-Allow-Credentials" = "'true'"
+  }
+}
+
+# ----------------------------------------
 # Lambda permissions (usar function ARN como function_name)
 # ----------------------------------------
 resource "aws_lambda_permission" "apigw_invoke_users_get" {
@@ -633,6 +733,14 @@ resource "aws_lambda_permission" "apigw_invoke_post_reports" {
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
 
+resource "aws_lambda_permission" "apigw_invoke_images_analysis" {
+  statement_id  = "AllowAPIGatewayInvokeImagesAnalysis"
+  action        = "lambda:InvokeFunction"
+  function_name = var.lambda_drone_images_get_function_arn
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
+}
+
 # ----------------------------------------
 # /callback (Cognito OAuth redirect)
 # ----------------------------------------
@@ -666,6 +774,14 @@ resource "aws_lambda_permission" "apigw_invoke_callback" {
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
 
+resource "aws_lambda_permission" "apigw_invoke_drone_image_upload" {
+  statement_id  = "AllowAPIGatewayInvokeDroneImageUpload"
+  action        = "lambda:InvokeFunction"
+  function_name = var.lambda_function_arn
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
+}
+
 # =============================================================================
 # DEPLOYMENT (actualizado)
 # =============================================================================
@@ -690,7 +806,10 @@ resource "aws_api_gateway_deployment" "main" {
     aws_api_gateway_integration.lambda_post_reports,
     aws_api_gateway_integration.reports_options_integration,
 
-    aws_api_gateway_integration.lambda_callback,
+    aws_api_gateway_integration.lambda_get_images_analysis,
+    aws_api_gateway_integration.images_analysis_options_integration,
+
+    aws_api_gateway_integration.lambda_callback
     
     # Integration responses
     aws_api_gateway_integration_response.sensor_data_options_integration_response
@@ -755,7 +874,15 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_method.reports_options.id,
       aws_api_gateway_integration.lambda_get_reports.id,
       aws_api_gateway_integration.lambda_post_reports.id,
-      aws_api_gateway_integration.reports_options_integration.id
+      aws_api_gateway_integration.reports_options_integration.id,
+
+      # images analysis
+      aws_api_gateway_resource.images.id,
+      aws_api_gateway_resource.images_analysis.id,
+      aws_api_gateway_method.images_analysis_get.id,
+      aws_api_gateway_method.images_analysis_options.id,
+      aws_api_gateway_integration.lambda_get_images_analysis.id,
+      aws_api_gateway_integration.images_analysis_options_integration.id
     ]))
   }
 

@@ -247,7 +247,7 @@ resource "aws_s3_bucket_public_access_block" "raw_images" {
 resource "aws_s3_bucket_versioning" "raw_images_versioning" {
   bucket = aws_s3_bucket.raw_images.id
   versioning_configuration {
-    status = "Enabled"
+    status = "Suspended"
   }
 }
 
@@ -290,6 +290,24 @@ resource "aws_s3_bucket_versioning" "processed_images_versioning" {
   bucket = aws_s3_bucket.processed_images.id
   versioning_configuration {
     status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "processed_images_lifecycle" {
+  bucket = aws_s3_bucket.processed_images.id
+
+  rule {
+    id     = "archive-processed-images"
+    status = "Enabled"
+
+    filter {
+      prefix = ""
+    }
+
+    transition {
+      days          = 90
+      storage_class = "DEEP_ARCHIVE"
+    }
   }
 }
 

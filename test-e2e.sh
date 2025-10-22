@@ -28,6 +28,9 @@ NC='\033[0m'
 # Test configuration
 TERRAFORM_DIR="terraform"
 TEST_IMAGE_FILE="./mocks/test_image.jpg"
+TEST_IMAGE_DRONE_ID=""
+TEST_USER_EMAIL="alerts-e2e@agrosynchro.test"
+TEST_SENSOR_USER_ID=""
 TEST_RESULTS=()
 TOTAL_TESTS=0
 PASSED_TESTS=0
@@ -125,7 +128,6 @@ get_terraform_outputs() {
     
     # Get outputs with better error handling
     API_URL=$(terraform output -raw api_gateway_invoke_url 2>/dev/null || echo "")
-    ALB_URL=$(terraform output -raw alb_health_check_url 2>/dev/null | sed 's|/health$||' || echo "")
     SQS_QUEUE_URL=$(terraform output -raw sqs_queue_url 2>/dev/null || echo "")
     VPC_ID=$(terraform output -raw vpc_id 2>/dev/null || echo "")
     
@@ -138,9 +140,47 @@ get_terraform_outputs() {
     
     log_success "Retrieved infrastructure endpoints"
     log_info "API Gateway URL: $API_URL"
-    log_info "ALB URL: $ALB_URL"
     log_info "SQS Queue URL: $SQS_QUEUE_URL"
     log_info "VPC ID: $VPC_ID"
+}
+
+ensure_test_user() {
+    log_step "Ensuring test user exists..."
+    local payload="{\"email\": \"${TEST_USER_EMAIL}\"}"
+    local response=$(curl -s -X POST "$API_URL/users" \
+        -H "Content-Type: application/json" \
+        -d "$payload")
+
+    TEST_SENSOR_USER_ID=$(echo "$response" | jq -r '
+        def norm:
+          if type=="object" then .
+          elif type=="string" then (fromjson? // {})
+          else {} end;
+        ([
+            (. | norm | .userid // .id // empty),
+            ((.body // {}) | norm | .userid // .id // empty)
+         ] | map(select(. != null and . != "")) | .[0]) // ""
+    ')
+
+    if [ -z "$TEST_SENSOR_USER_ID" ]; then
+        local users_response=$(curl -s "$API_URL/users")
+        TEST_SENSOR_USER_ID=$(echo "$users_response" | jq -r --arg email "$TEST_USER_EMAIL" '
+            def norm:
+              if type=="object" then .
+              elif type=="string" then (fromjson? // {})
+              else {} end;
+            ([
+              (. | norm | (.data // []) | .[]? | select(.email==$email or .mail==$email) | (.id // .userid) // empty),
+              ((.body // {}) | norm | (.data // []) | .[]? | select(.email==$email or .mail==$email) | (.id // .userid) // empty)
+            ] | map(select(. != null and . != "")) | .[0]) // ""
+        ')
+    fi
+
+    if [ -z "$TEST_SENSOR_USER_ID" ]; then
+        log_warning "Could not determine test user ID; sensor data tests may fail"
+    else
+        log_info "Using test user id: $TEST_SENSOR_USER_ID"
+    fi
 }
 
 # =============================================================================
@@ -251,7 +291,7 @@ test_s3_processed_bucket_exists() {
 }
 
 test_s3_bucket_versioning() {
-    local bucket=$(aws s3api list-buckets --region ${AWS_REGION:-us-east-1} --output json | jq -r '.Buckets[].Name' | grep "agrosynchro.*raw.*images" | head -1)
+    local bucket=$(aws s3api list-buckets --region ${AWS_REGION:-us-east-1} --output json | jq -r '.Buckets[].Name' | grep "agrosynchro.*processed.*images" | head -1)
     if [ ! -z "$bucket" ]; then
         local versioning=$(aws s3api get-bucket-versioning --bucket "$bucket" --region ${AWS_REGION:-us-east-1} --output json 2>/dev/null)
         echo "$versioning" | jq -r '.Status' | grep -q "Enabled"
@@ -335,10 +375,15 @@ test_fargate_tasks_healthy() {
 
 test_sensor_data_flow() {
     # Test sensor data flow: API Gateway → SQS → Fargate → RDS
+    if [ -z "$TEST_SENSOR_USER_ID" ]; then
+        log_warning "Test user not available; skipping sensor data flow test"
+        return 1
+    fi
+    local payload=$(printf '{"user_id": "%s", "measurements": {"temperature": 25.5, "humidity": 60.0}}' "$TEST_SENSOR_USER_ID")
     local response=$(curl -s -X POST "$API_URL/messages" \
         -H "Content-Type: application/json" \
-        -d '{"user_id": "test-user", "measurements": {"temperature": 25.5, "humidity": 60.0}}')
-    
+        -d "$payload")
+
     # Test passes if API Gateway accepts sensor data
     echo "$response" | grep -q "Message sent to queue successfully"
 }
@@ -367,11 +412,11 @@ test_image_processing_flow() {
         return 1
     fi
     
-    local drone_id="e2e-test-$(date +%s)"
+    TEST_IMAGE_DRONE_ID="e2e-test-$(date +%s)"
     local upload_response=$(curl -s -X POST "$API_URL/api/drones/image" \
         -H "Content-Type: multipart/form-data" \
         -F "image=@$TEST_IMAGE_FILE" \
-        -F "drone_id=$drone_id" \
+        -F "drone_id=$TEST_IMAGE_DRONE_ID" \
         -F "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)")
     
     # Check if upload was successful
@@ -384,7 +429,7 @@ test_image_appears_in_processed_bucket() {
     
     local processed_bucket=$(aws s3api list-buckets --region ${AWS_REGION:-us-east-1} --output json | jq -r '.Buckets[].Name' | grep "agrosynchro.*processed.*images" | head -1)
     if [ ! -z "$processed_bucket" ]; then
-        aws s3 ls s3://"$processed_bucket"/processed/drone-images/ --recursive | grep -q "e2e-test"
+        aws s3 ls s3://"$processed_bucket"/processed/drone-images/ --recursive | grep -q "$TEST_IMAGE_DRONE_ID"
     else
         return 1
     fi
@@ -395,130 +440,70 @@ test_image_removed_from_raw_bucket() {
     local raw_bucket=$(aws s3api list-buckets --region ${AWS_REGION:-us-east-1} --output json | jq -r '.Buckets[].Name' | grep "agrosynchro.*raw.*images" | head -1)
     if [ ! -z "$raw_bucket" ]; then
         # Should NOT find the e2e-test image in raw bucket
-        ! aws s3 ls s3://"$raw_bucket"/drone-images/ --recursive | grep -q "e2e-test"
+        ! aws s3 ls s3://"$raw_bucket"/drone-images/ --recursive | grep -q "$TEST_IMAGE_DRONE_ID"
     else
         return 1
     fi
 }
 
 # =============================================================================
-# ALB/FARGATE DATABASE TESTS
+# API DATA VALIDATION TESTS
 # =============================================================================
 
-test_alb_health_endpoint() {
-    # Test ALB health endpoint
-    if [ -z "$ALB_URL" ]; then
-        log_warning "ALB_URL not set, skipping ALB tests"
-        return 1
-    fi
-    
-    local response=$(curl -s -o /dev/null -w "%{http_code}" "$ALB_URL/health")
+test_processed_images_endpoint() {
+    local response=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/images/analysis?limit=1")
     [ "$response" = "200" ]
 }
 
-test_database_connectivity() {
-    # Test database connectivity via ALB health endpoint
-    if [ -z "$ALB_URL" ]; then
-        return 1
-    fi
-    
-    local health_response=$(curl -s "$ALB_URL/health")
-    echo "$health_response" | jq -r '.database.connected' | grep -q "true"
-}
-
-test_database_migrations() {
-    # Verify database tables exist via ALB health endpoint
-    if [ -z "$ALB_URL" ]; then
-        return 1
-    fi
-    
-    local health_response=$(curl -s "$ALB_URL/health")
-    local tables=$(echo "$health_response" | jq -r '.database.tables[]' 2>/dev/null)
-    
-    # Check for required tables
-    echo "$tables" | grep -q "users" && \
-    echo "$tables" | grep -q "sensor_data" && \
-    echo "$tables" | grep -q "drone_images" && \
-    echo "$tables" | grep -q "parameters"
-}
-
 test_image_analysis_in_database() {
-    # Test that image analysis results are stored in database
-    if [ -z "$ALB_URL" ]; then
-        return 1
-    fi
-    
-    # Wait additional time for processing and analysis
     sleep 15
-    
-    local analysis_response=$(curl -s "$ALB_URL/api/images/analysis?limit=5")
+    local analysis_response=$(curl -s "$API_URL/images/analysis?limit=5")
     local success=$(echo "$analysis_response" | jq -r '.success' 2>/dev/null)
     local count=$(echo "$analysis_response" | jq -r '.count' 2>/dev/null)
-    
     [ "$success" = "true" ] && [ "$count" -gt 0 ]
 }
 
 test_image_analysis_has_drone_id() {
-    # Verify that analysis results contain our test drone_id
-    if [ -z "$ALB_URL" ]; then
+    if [ -z "$TEST_IMAGE_DRONE_ID" ]; then
         return 1
     fi
-    
-    local analysis_response=$(curl -s "$ALB_URL/api/images/analysis?limit=10")
-    echo "$analysis_response" | jq -r '.data[].drone_id' 2>/dev/null | grep -q "e2e-test"
+    local analysis_response=$(curl -s "$API_URL/images/analysis?limit=10&drone_id=$TEST_IMAGE_DRONE_ID")
+    local count=$(echo "$analysis_response" | jq -r '.count' 2>/dev/null)
+    [ "$count" -gt 0 ]
 }
 
 test_image_analysis_has_field_status() {
-    # Verify that analysis results have field_status and confidence
-    if [ -z "$ALB_URL" ]; then
-        return 1
-    fi
-    
-    local analysis_response=$(curl -s "$ALB_URL/api/images/analysis?limit=5")
+    local analysis_response=$(curl -s "$API_URL/images/analysis?limit=5")
     local first_status=$(echo "$analysis_response" | jq -r '.data[0].field_status' 2>/dev/null)
     local first_confidence=$(echo "$analysis_response" | jq -r '.data[0].analysis_confidence' 2>/dev/null)
-    
-    # Check if field_status is one of the valid values
     echo "$first_status" | grep -E "excellent|good|fair|poor|critical" > /dev/null && \
     [ "$first_confidence" != "null" ] && [ "$first_confidence" != "0" ]
 }
 
-test_sensor_averages_endpoint() {
-    # Test sensor averages endpoint (may be empty but should respond correctly)
-    if [ -z "$ALB_URL" ]; then
-        return 1
-    fi
-    
-    local response=$(curl -s -o /dev/null -w "%{http_code}" "$ALB_URL/api/sensors/average")
-    [ "$response" = "200" ]
-}
-
 test_sensor_data_in_database() {
-    # Test that sensor data gets processed and stored in database
-    if [ -z "$ALB_URL" ]; then
-        return 1
-    fi
-    
-    # Send sensor data with unique test values
     local test_temp="99.9"
     local test_humidity="88.8"
     local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    
+
+    if [ -z "$TEST_SENSOR_USER_ID" ]; then
+        log_warning "Test user not available; skipping sensor data database validation"
+        return 1
+    fi
+
+    local payload=$(printf '{"user_id": "%s", "timestamp": "%s", "measurements": {"temperature": %s, "humidity": %s}}' "$TEST_SENSOR_USER_ID" "$timestamp" "$test_temp" "$test_humidity")
+
     curl -s -X POST "$API_URL/messages" \
         -H "Content-Type: application/json" \
-        -d "{\"user_id\": \"test-user-e2e\", \"timestamp\": \"$timestamp\", \"measurements\": {\"temperature\": $test_temp, \"humidity\": $test_humidity}}" > /dev/null
-    
-    # Wait for SQS processing
-    sleep 10
-    
-    # Check if data appears in sensor averages (might be averaged with other data)
-    local averages_response=$(curl -s "$ALB_URL/api/sensors/average")
-    local has_data=$(echo "$averages_response" | jq -r '.data.sensors_count' 2>/dev/null)
-    
-    # Test passes if there's sensor data in the system
-    [ "$has_data" != "null" ] && [ "$has_data" -gt 0 ]
-}
+        -d "$payload" > /dev/null
 
+    sleep 15
+
+    local sensor_response=$(curl -s "$API_URL/sensor_data?user_id=$TEST_SENSOR_USER_ID")
+    local success=$(echo "$sensor_response" | jq -r '.success' 2>/dev/null)
+    local count=$(echo "$sensor_response" | jq -r '.data | length' 2>/dev/null)
+
+    [ "$success" = "true" ] && [ "$count" -gt 0 ]
+}
 # =============================================================================
 # MAIN EXECUTION
 # =============================================================================
@@ -566,17 +551,12 @@ run_all_tests() {
     run_test "Fargate Service Running" test_fargate_service_running
     run_test "Fargate Tasks Healthy" test_fargate_tasks_healthy
     
-    log_step "Running ALB/Database tests..."
-    run_test "ALB Health Endpoint" test_alb_health_endpoint
-    run_test "Database Connectivity" test_database_connectivity
-    run_test "Database Migrations" test_database_migrations
-    run_test "Sensor Averages Endpoint" test_sensor_averages_endpoint
-    
     log_step "Running sensor data integration tests..."
     run_test "Sensor Data Flow (API→SQS)" test_sensor_data_flow
     run_test "Sensor Data Stored in Database" test_sensor_data_in_database
     
     log_step "Running image integration tests..."
+    run_test "Processed Images API Endpoint" test_processed_images_endpoint
     run_test "Drone Image Upload Flow (API→Lambda→S3)" test_drone_image_upload_flow
     run_test "Image Processing Flow (S3→Fargate→Analysis)" test_image_processing_flow
     run_test "Image Appears in Processed Bucket" test_image_appears_in_processed_bucket  
@@ -645,6 +625,7 @@ main() {
     # Run test suite
     check_prerequisites
     get_terraform_outputs
+    ensure_test_user
     #create_test_image
     run_all_tests
     display_results

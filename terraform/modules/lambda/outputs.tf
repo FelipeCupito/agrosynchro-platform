@@ -91,6 +91,16 @@ output "lambda_reports_post_function_arn" {
   value       = aws_lambda_function.report_field.arn
 }
 
+output "lambda_drone_images_get_invoke_arn" {
+  description = "Invoke ARN for GET /images/analysis"
+  value       = aws_lambda_function.drone_images_get.invoke_arn
+}
+
+output "lambda_drone_images_get_function_arn" {
+  description = "Function ARN for GET /images/analysis"
+  value       = aws_lambda_function.drone_images_get.arn
+}
+
 # --- Database initialization function (comentado: descomentar cuando RDS esté listo) ---
 # output "lambda_init_db_function_arn" {
 #   description = "Function ARN for database initialization"
@@ -123,4 +133,3 @@ output "lambda_cognito_callback_function_name" {
   description = "Function name for Cognito callback"
   value       = aws_lambda_function.cognito_callback.function_name
 }
-
