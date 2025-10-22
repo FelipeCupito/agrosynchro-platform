@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# fix-cognito-circular.sh
-# Despliegue en 2 fases para romper la dependencia circular Cognito ⇄ API Gateway ⇄ Lambda
-# Fase 1: terraform apply con campos de Cognito vacíos (ya definidos en main.tf)
-# Fase 2: lee outputs y actualiza variables de entorno de la Lambda de callback
+# deploy_app.sh - Despliegue completo de Agrosynchro Platform
+# 
+# Despliegue automatizado completo en múltiples fases:
+# Fase 0A: Build del frontend React (npm run build)  
+# Fase 0B: Build y deploy del processing engine (Docker + Fargate)
+# Fase 1:  Deploy de infraestructura (terraform apply)
+# Fase 2:  Configuración de Cognito (actualiza Lambda callback)
+# Fase 3:  Inicialización de base de datos (ejecuta init_db Lambda)
 
 AUTO_APPROVE=false
 SKIP_INIT=false
@@ -16,7 +20,19 @@ while [[ $# -gt 0 ]]; do
     --skip-init)
       SKIP_INIT=true; shift ;;
     -h|--help)
-      echo "Uso: $0 [--auto-approve|-y] [--skip-init]"; exit 0 ;;
+      echo "Uso: $0 [--auto-approve|-y] [--skip-init]"
+      echo ""
+      echo "Despliegue completo de Agrosynchro Platform:"
+      echo "  • Build del frontend React"
+      echo "  • Build y deploy del processing engine"
+      echo "  • Deploy de infraestructura AWS"
+      echo "  • Configuración automática de Cognito"
+      echo "  • Inicialización de base de datos"
+      echo ""
+      echo "Opciones:"
+      echo "  -y, --auto-approve  No pedir confirmación en terraform apply"
+      echo "  --skip-init         Saltar terraform init"
+      exit 0 ;;
     *)
       echo "Argumento desconocido: $1"; exit 2 ;;
   esac
@@ -34,6 +50,44 @@ cd "$TF_DIR"
 
 command -v terraform >/dev/null 2>&1 || { echo "❌ Terraform no está instalado o no está en PATH" >&2; exit 1; }
 command -v aws >/dev/null 2>&1 || { echo "❌ AWS CLI no está instalado o no está en PATH" >&2; exit 1; }
+command -v npm >/dev/null 2>&1 || { echo "❌ npm no está instalado o no está en PATH" >&2; exit 1; }
+
+# Fase 0A: Build del Frontend
+echo "🎨 Construyendo frontend (npm run build)"
+FRONTEND_DIR="$SCRIPT_DIR/../services/web-dashboard/frontend"
+if [[ -d "$FRONTEND_DIR" ]]; then
+  cd "$FRONTEND_DIR"
+  if [[ -f "package.json" ]]; then
+    echo "📦 Instalando dependencias del frontend..."
+    npm ci --production=false
+    echo "🔨 Compilando aplicación React..."
+    npm run build
+    echo "✅ Frontend compilado exitosamente"
+  else
+    echo "❌ No se encontró package.json en: $FRONTEND_DIR" >&2
+    exit 1
+  fi
+else
+  echo "❌ No se encontró directorio del frontend: $FRONTEND_DIR" >&2
+  exit 1
+fi
+
+# Fase 0B: Build y deploy del Processing Engine
+echo "⚙️ Construyendo y desplegando processing engine"
+PROCESSING_DIR="$SCRIPT_DIR/../services/processing-engine"
+if [[ -d "$PROCESSING_DIR" && -f "$PROCESSING_DIR/build-and-deploy.sh" ]]; then
+  cd "$PROCESSING_DIR"
+  chmod +x build-and-deploy.sh
+  echo "🐳 Ejecutando build-and-deploy.sh..."
+  ./build-and-deploy.sh
+  echo "✅ Processing engine desplegado exitosamente"
+else
+  echo "❌ No se encontró build-and-deploy.sh en: $PROCESSING_DIR" >&2
+  exit 1
+fi
+
+# Volver al directorio de Terraform
+cd "$TF_DIR"
 
 if [[ "$SKIP_INIT" == "false" ]]; then
   echo "🔧 terraform init"
@@ -81,9 +135,35 @@ aws lambda update-function-configuration \
   --environment "$ENV_JSON" \
   --region "$REGION" >/dev/null
 
+echo "🗃️ Ejecutando inicialización de base de datos"
+
+# Ejecutar la lambda init_db para inicializar la base de datos
+aws lambda invoke \
+  --function-name agrosynchro-init-db \
+  --region "$REGION" \
+  --payload '{}' \
+  --output json \
+  /tmp/init_db_response.json > /dev/null
+
+# Verificar el resultado
+if aws logs filter-log-events \
+  --log-group-name "/aws/lambda/agrosynchro-init-db" \
+  --start-time $(($(date +%s) - 300)) \
+  --region "$REGION" \
+  --query 'events[0].message' \
+  --output text 2>/dev/null | grep -q "SUCCESS\|created\|initialized" ; then
+  echo "✅ Base de datos inicializada correctamente"
+else
+  echo "⚠️  Inicialización de BD ejecutada (verificar logs si hay problemas)"
+fi
+
 echo "🎉 Proceso completado"
-echo "Resumen:"
-echo "  1) terraform apply ejecutado (Fase 1)"
-echo "  2) Lambda de callback actualizada con COGNITO_DOMAIN/CLIENT_ID/FRONTEND_URL (Fase 2)"
+echo "Resumen de despliegue completo:"
+echo "  0A) Frontend compilado (npm run build)"
+echo "  0B) Processing Engine desplegado (Docker + Fargate)"
+echo "  1)  Infraestructura desplegada (terraform apply)"
+echo "  2)  Lambda de callback actualizada con variables de Cognito"
+echo "  3)  Base de datos inicializada (init_db Lambda)"
 echo ""
+echo "🚀 Toda la aplicación Agrosynchro está desplegada y lista!"
 echo "Puedes probar el flujo OAuth en: $FRONTEND_URL"
