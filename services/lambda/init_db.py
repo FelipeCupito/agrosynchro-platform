@@ -31,6 +31,8 @@ def lambda_handler(event, context):
                 mail   VARCHAR(255) NOT NULL UNIQUE
             );
         """)
+
+        
        
         cur.execute("""
             CREATE TABLE IF NOT EXISTS parameters (

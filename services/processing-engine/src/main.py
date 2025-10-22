@@ -668,38 +668,47 @@ def run_startup_migrations():
         logger.info("Creating users table...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username TEXT NOT NULL,
-                email TEXT NOT NULL
-            )
+                userid SERIAL PRIMARY KEY,
+                mail   VARCHAR(255) NOT NULL UNIQUE
+            );
         """)
         
         logger.info("Creating parameters table...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS parameters (
                 id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                temperature REAL,
-                humidity REAL,
-                soil_moisture REAL,
-                min_temperature REAL,
-                max_temperature REAL,
-                min_humidity REAL,
-                max_humidity REAL,
-                min_soil_moisture REAL,
-                max_soil_moisture REAL
-            )
+                userid             INTEGER REFERENCES users(userid),
+                min_temperature    FLOAT,
+                max_temperature    FLOAT,
+                min_humidity       FLOAT,
+                max_humidity       FLOAT,
+                min_soil_moisture  FLOAT,
+                max_soil_moisture  FLOAT,
+                UNIQUE (userid)
+            );
         """)
         
         logger.info("Creating sensor_data table...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sensor_data (
                 id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                timestamp TIMESTAMP NOT NULL,
-                measure TEXT NOT NULL,
-                value REAL NOT NULL
-            )
+                userid     INTEGER REFERENCES users(userid),
+                timestamp  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                temp       FLOAT,
+                hum        FLOAT,
+                soil       FLOAT
+                );
+
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS reports (
+                id SERIAL primary key,
+                userid     INTEGER REFERENCES users(userid),
+                time  date NOT NULL DEFAULT CURRENT_DATE,
+                report text not null,
+                unique (userid,  time)
+                );
         """)
         
         logger.info("Creating drone_images table...")
@@ -728,8 +737,6 @@ if __name__ == "__main__":
     logger.info("Starting Processing Engine (SQS + Image processing version)...")
     get_aws_clients()
     
-    # Run migrations first
-    run_startup_migrations()
     
     # Iniciar workers automáticamente
     worker_running = True

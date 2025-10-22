@@ -1,3 +1,6 @@
+# Get current AWS account ID
+data "aws_caller_identity" "current" {}
+
 # API Gateway REST API
 resource "aws_api_gateway_rest_api" "main" {
   name        = "${var.project_name}-api"
@@ -92,20 +95,16 @@ resource "aws_api_gateway_integration" "sqs_integration" {
   type        = "AWS"
 
   integration_http_method = "POST"
-  uri                     = "arn:aws:apigateway:${var.region}:sqs:path/${var.sqs_queue_name}"
+  uri                     = "arn:aws:apigateway:${var.region}:sqs:path/${data.aws_caller_identity.current.account_id}/${var.sqs_queue_name}"
   credentials             = var.api_gateway_role_arn
 
   request_parameters = {
-    "integration.request.header.Content-Type" = "'application/x-amz-json-1.0'"
+    "integration.request.header.Content-Type" = "'application/x-www-form-urlencoded'"
   }
 
   request_templates = {
     "application/json" = <<EOF
-{
-  "Action": "SendMessage",
-  "MessageBody": "$util.escapeJavaScript($input.body)",
-  "QueueUrl": "${var.sqs_queue_url}"
-}
+Action=SendMessage&MessageBody=$util.urlEncode($input.body)&QueueUrl=${var.sqs_queue_url}
 EOF
   }
 }
