@@ -96,6 +96,25 @@ else
   echo "⚠️  Saltando terraform init (por --skip-init)"
 fi
 
+# Verificar e importar repositorio ECR existente si es necesario
+echo "🔍 Verificando repositorio ECR existente..."
+PROJECT_NAME="$(terraform output -raw project_name 2>/dev/null || echo "agrosynchro")"
+ECR_REPO_NAME="${PROJECT_NAME}-processing-engine"
+
+# Verificar si el recurso ya está en el estado de Terraform
+if ! terraform state show "module.fargate.aws_ecr_repository.processing_engine" >/dev/null 2>&1; then
+  # Verificar si el repositorio existe en AWS
+  if aws ecr describe-repositories --repository-names "$ECR_REPO_NAME" >/dev/null 2>&1; then
+    echo "📦 Importando repositorio ECR existente: $ECR_REPO_NAME"
+    terraform import module.fargate.aws_ecr_repository.processing_engine "$ECR_REPO_NAME"
+    echo "✅ Repositorio ECR importado exitosamente"
+  else
+    echo "🆕 El repositorio ECR se creará durante el apply"
+  fi
+else
+  echo "✅ Repositorio ECR ya está en el estado de Terraform"
+fi
+
 APPLY_ARGS=(apply)
 if [[ "$AUTO_APPROVE" == "true" ]]; then APPLY_ARGS+=(-auto-approve); fi
 
