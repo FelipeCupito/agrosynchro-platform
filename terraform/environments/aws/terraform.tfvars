@@ -26,4 +26,4 @@ db_password = "agro12345"
 db_instance_class = "db.t3.micro"
 
 # Disable read replica for faster testing (enable later for production)
-create_read_replica = false
+create_read_replica = true

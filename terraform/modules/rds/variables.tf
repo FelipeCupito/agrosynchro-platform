@@ -80,7 +80,7 @@ variable "deletion_protection" {
 variable "create_read_replica" {
   description = "Create read replica"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "replica_instance_class" {
