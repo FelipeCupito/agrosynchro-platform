@@ -56,7 +56,6 @@ function processOAuthCallback() {
     const expiresIn = params.get('expires_in');
     
     if (accessToken && idToken) {
-      console.log('Tokens received successfully');
       
       // Guardar tokens en localStorage
       localStorage.setItem('access_token', accessToken);

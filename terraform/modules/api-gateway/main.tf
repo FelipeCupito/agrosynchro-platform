@@ -452,6 +452,7 @@ resource "aws_api_gateway_method_response" "get_sensor_data_response_200" {
   }
 }
 
+# OPTIONS integration response (poner headers CORS)
 resource "aws_api_gateway_integration_response" "sensor_data_options_integration_response" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   resource_id = aws_api_gateway_resource.sensor_data.id
@@ -689,7 +690,10 @@ resource "aws_api_gateway_deployment" "main" {
     aws_api_gateway_integration.lambda_post_reports,
     aws_api_gateway_integration.reports_options_integration,
 
-    aws_api_gateway_integration.lambda_callback
+    aws_api_gateway_integration.lambda_callback,
+    
+    # Integration responses
+    aws_api_gateway_integration_response.sensor_data_options_integration_response
   ]
 
   rest_api_id = aws_api_gateway_rest_api.main.id

@@ -29,8 +29,7 @@ export function processOAuthCallback() {
   if (typeof window === 'undefined') return;
   
   console.log('🔍 Processing OAuth callback...');
-  console.log('Current URL:', window.location.href);
-  console.log('Hash:', window.location.hash);
+
   
   const hash = window.location.hash?.startsWith('#') ? window.location.hash.substring(1) : '';
   if (!hash) {
@@ -39,7 +38,6 @@ export function processOAuthCallback() {
   }
 
   const params = new URLSearchParams(hash);
-  console.log('📦 Hash params:', Array.from(params.entries()));
   
   const error = params.get('error');
   if (error) {
@@ -55,14 +53,14 @@ export function processOAuthCallback() {
   const expiresIn = params.get('expires_in');
 
   if (accessToken) {
-    console.log('✅ Access token received, saving to localStorage');
+    
     localStorage.setItem('access_token', accessToken);
   } else {
     console.warn('⚠️ No access_token in hash');
   }
   
   if (idToken) {
-    console.log('✅ ID token received, saving to localStorage');
+    
     localStorage.setItem('id_token', idToken);
   }
   if (refreshToken) {
@@ -73,7 +71,7 @@ export function processOAuthCallback() {
     localStorage.setItem('token_expiration', String(expirationTime));
   }
 
-  console.log('✅ Tokens saved, clearing hash from URL');
+  
   // Clear hash from URL
   window.history.replaceState(null, '', window.location.pathname);
 }

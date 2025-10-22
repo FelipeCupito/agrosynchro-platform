@@ -1,4 +1,5 @@
 import React from "react";
+import { BarChart3, FileText, LogIn, LogOut, Leaf } from "lucide-react";
 
 import Dashboard from "./pages/Dashboard";
 import Reports from "./pages/Reports";
@@ -33,7 +34,7 @@ function App() {
         return;
       }
 
-      console.log('👤 Syncing user to DB:', userInfo);
+      
 
       // Llama a POST /users para crear/actualizar el usuario en la BD
       const apiUrl = window.ENV?.API_URL || 'http://localhost:3000';
@@ -52,7 +53,7 @@ function App() {
 
       if (response.ok) {
         const data = await response.json();
-        console.log('✅ User synced successfully:', data);
+        
         // La lambda retorna "userid" cuando recibe cognito_sub
         if (data.userid) {
           setUserId(String(data.userid));
@@ -73,24 +74,83 @@ function App() {
 
   if (!auth) {
     return (
-      <div style={{ padding: "2rem" }}>
-        <h1>Agrosynchro</h1>
-        <p>Para continuar, iniciá sesión con Cognito.</p>
-        <button onClick={login}>Login</button>
+      <div className="login-container">
+        <div className="card login-card">
+          <div className="card-content">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '2rem' }}>
+              <Leaf size={40} style={{ color: 'var(--primary)', marginRight: '0.5rem' }} />
+              <h1 className="login-title">Agrosynchro</h1>
+            </div>
+            <p className="login-subtitle">
+              Monitoreo inteligente de cultivos para una agricultura más eficiente
+            </p>
+            <p style={{ marginBottom: '2rem', color: 'var(--text-secondary)' }}>
+              Para continuar, iniciá sesión con tu cuenta
+            </p>
+            <button className="btn btn-primary btn-lg" onClick={login} style={{ width: '100%' }}>
+              <LogIn size={20} />
+              Iniciar Sesión
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <nav style={{ marginBottom: "2rem" }}>
-        <button onClick={() => setTab("dashboard")}>Dashboard</button>
-        <button onClick={() => setTab("reports")}>Reportes</button>
-        <span style={{ marginLeft: 16 }} />
-        <button onClick={logout}>Logout</button>
+    <div className="app-container">
+      <nav className="navbar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Leaf size={28} style={{ color: 'var(--primary)' }} />
+          <span className="navbar-brand">Agrosynchro</span>
+        </div>
+        
+        <div className="navbar-nav">
+          <button 
+            className={`btn ${tab === "dashboard" ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => setTab("dashboard")}
+          >
+            <BarChart3 size={18} />
+            Dashboard
+          </button>
+          <button 
+            className={`btn ${tab === "reports" ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => setTab("reports")}
+          >
+            <FileText size={18} />
+            Reportes
+          </button>
+        </div>
+
+        <div className="navbar-actions">
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
+            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-primary)', fontWeight: '500' }}>
+              {getUserInfo()?.email || 'Usuario'}
+            </span>
+            {userId && (
+              <span style={{ 
+                fontSize: 'var(--font-size-xs)', 
+                color: 'var(--text-secondary)',
+                background: 'var(--light-gray)',
+                padding: '0.125rem 0.375rem',
+                borderRadius: 'var(--border-radius-sm)',
+                fontWeight: '500'
+              }}>
+                ID: {userId}
+              </span>
+            )}
+          </div>
+          <button className="btn btn-secondary" onClick={logout}>
+            <LogOut size={16} />
+            Salir
+          </button>
+        </div>
       </nav>
-      {tab === "dashboard" && <Dashboard userId={userId} />}
-      {tab === "reports" && <Reports userId={userId} />}
+
+      <main className="main-content">
+        {tab === "dashboard" && <Dashboard userId={userId} />}
+        {tab === "reports" && <Reports userId={userId} />}
+      </main>
     </div>
   );
 }

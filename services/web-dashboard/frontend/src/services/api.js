@@ -20,15 +20,12 @@ axiosInstance.interceptors.request.use((config) => {
 });
 
 const getApiUrl = () => {
-  console.log('window.ENV:', window.ENV);
   return window.ENV?.API_URL || 'http://localhost:3000/api';
 
-  console.log('Using API URL from env.js:', window.ENV.API_URL);
   return window.ENV.API_URL;
 };
 
 const API_URL = getApiUrl();
-console.log('Using API URL:', API_URL); // Para debug
 
 export const getUsers = () => axiosInstance.get(`${API_URL}/users`);
 export const getSensorData = (userId) => axiosInstance.get(`${API_URL}/sensor_data?user_id=${userId}`);

@@ -64,6 +64,8 @@ resource "aws_cognito_user_pool_client" "this" {
   allowed_oauth_flows_user_pool_client = true
   allowed_oauth_flows                  = var.oauth_flows
   allowed_oauth_scopes                 = var.oauth_scopes
+  # Identity providers - Enable Cognito as identity provider
+  supported_identity_providers = ["COGNITO"]
 
   # Callback URLs (ajustar según tu frontend)
   callback_urls = var.callback_urls
