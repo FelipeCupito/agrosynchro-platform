@@ -36,16 +36,44 @@ resource "aws_sqs_queue" "dlq" {
   }
 }
 
-# Use existing LabRole for API Gateway
-data "aws_iam_role" "api_gateway_sqs_role" {
-  name = "LabRole"
+# IAM role for API Gateway to interact with SQS
+resource "aws_iam_role" "api_gateway_sqs_role" {
+  name = "${var.project_name}-api-gateway-sqs-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Action = "sts:AssumeRole",
+        Effect = "Allow",
+        Principal = {
+          Service = "apigateway.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name = "${var.project_name}-api-gateway-sqs-role"
+  }
 }
 
-# Skip custom policies - LabRole has admin permissions
+resource "aws_iam_role_policy" "api_gateway_sqs_policy" {
+  name = "${var.project_name}-api-gateway-sqs-policy"
+  role = aws_iam_role.api_gateway_sqs_role.id
 
-# Use existing LabRole for Fargate
-data "aws_iam_role" "fargate_sqs_role" {
-  name = "LabRole"
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect   = "Allow",
+        Action   = [
+          "sqs:SendMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl"
+        ],
+        Resource = aws_sqs_queue.main.arn
+      }
+    ]
+  })
 }
-
-# Skip custom policies - LabRole has admin permissions

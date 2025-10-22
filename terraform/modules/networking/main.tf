@@ -150,10 +150,16 @@ resource "aws_route_table_association" "database" {
   route_table_id = aws_route_table.database.id
 }
 
-# VPC Endpoint for S3
+# VPC Endpoint 
 resource "aws_vpc_endpoint" "s3" {
-  vpc_id       = aws_vpc.main.id
-  service_name = "com.amazonaws.${var.region}.s3"
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.${var.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = concat(
+    [aws_route_table.public.id],
+    aws_route_table.private[*].id,
+    [aws_route_table.database.id]
+  )
 
   tags = {
     Name = "${var.project_name}-s3-endpoint"

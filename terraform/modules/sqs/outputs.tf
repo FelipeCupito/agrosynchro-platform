@@ -35,11 +35,5 @@ output "dlq_url" {
 
 output "api_gateway_role_arn" {
   description = "IAM role ARN for API Gateway to access SQS"
-  value       = data.aws_iam_role.api_gateway_sqs_role.arn
+  value       = aws_iam_role.api_gateway_sqs_role.arn
 }
-
-output "fargate_role_arn" {
-  description = "IAM role ARN for Fargate to access SQS"
-  value       = data.aws_iam_role.fargate_sqs_role.arn
-}
-
