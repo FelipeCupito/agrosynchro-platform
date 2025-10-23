@@ -1,505 +1,169 @@
-# AgroSynchro - Arquitectura Detallada
-
-## 🎯 Visión General
-
-AgroSynchro es una plataforma cloud para agricultura de precisión que integra datos de sensores IoT e imágenes de drones para generar recomendaciones agronómicas basadas en evidencia. La arquitectura está diseñada como un sistema serverless en AWS que separa claramente la ingesta de datos externa del backend interno del dashboard.
-
-## 🏗️ Arquitectura de Alto Nivel
-
-### Principios de Diseño
-
-1. **Separación de Responsabilidades**
-   - API Gateway para ingesta externa de datos
-   - Application Load Balancer para backend del dashboard interno
-
-2. **Escalabilidad Automática**
-   - ECS Fargate con auto-scaling basado en CPU
-   - SQS para manejo asíncrono de cargas variables
-
-3. **Seguridad por Capas**
-   - VPC con subnets aisladas por función
-   - Cifrado en tránsito y en reposo
-   - IAM roles con permisos mínimos
-
-4. **Disponibilidad y Resiliencia**
-   - RDS Multi-AZ para alta disponibilidad
-   - Dead Letter Queue para manejo de errores
-   - Health checks automáticos en todos los niveles
-
-## 🔄 Flujos de Datos
-
-### 1. Ingesta de Datos de Sensores IoT
-
-```
-[Sensor IoT] 
-    ↓ POST /messages
-[API Gateway] 
-    ↓ JSON payload
-[SQS Queue]
-    ↓ Message polling
-[Fargate Container]
-    ↓ Parse & validate
-[RDS PostgreSQL]
-```
-
-**Detalles técnicos:**
-- Sensores envían datos cada 5 minutos
-- API Gateway aplica throttling (100 req/sec, burst 200)
-- SQS garantiza entrega de mensajes
-- Fargate procesa en lotes para eficiencia
-
-### 2. Procesamiento de Imágenes de Drones
-
-```
-[Drone] 
-    ↓ POST /api/drones/image (multipart)
-[API Gateway]
-    ↓ Trigger
-[Lambda Function]
-    ↓ Upload
-[S3 Raw Images]
-    ↓ Metadata → SQS
-[Fargate Container]
-    ↓ Download & analyze
-[IA Simulation] → [S3 Processed] + [RDS Analysis Results]
-```
-
-**Detalles técnicos:**
-- Lambda maneja el upload inicial para optimizar costos
-- S3 con versionado para preservar historial
-- IA simulada analiza condición del campo
-- Resultados almacenados para consultas posteriores
-
-### 3. Consultas del Dashboard
-
-```
-[Frontend Web]
-    ↓ HTTP requests
-[Application Load Balancer]
-    ↓ Forward to healthy targets
-[Fargate Container]
-    ↓ Query database
-[RDS PostgreSQL] → [Response] → [Frontend]
-```
-
-**Detalles técnicos:**
-- ALB distribuye carga entre contenedores disponibles
-- Health checks cada 30 segundos en `/health`
-- Conexión directa a RDS desde VPC privada
-- Respuestas en JSON para consumo del frontend
-
-## 🗄️ Modelo de Datos
-
-### Base de Datos: PostgreSQL 15.8
-
-#### Tabla: `users`
-```sql
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    username TEXT NOT NULL,
-    email TEXT NOT NULL
-);
-```
-
-#### Tabla: `sensor_data`  
-```sql
-CREATE TABLE sensor_data (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    timestamp TIMESTAMP NOT NULL,
-    measure TEXT NOT NULL,        -- 'temperature', 'humidity', 'soil_moisture'
-    value REAL NOT NULL
-);
-```
-
-#### Tabla: `drone_images`
-```sql
-CREATE TABLE drone_images (
-    id SERIAL PRIMARY KEY,
-    drone_id VARCHAR(255),
-    raw_s3_key VARCHAR(500),           -- S3 path to original image
-    processed_s3_key VARCHAR(500),     -- S3 path to processed image  
-    field_status VARCHAR(50) DEFAULT 'unknown',  -- 'excellent', 'good', 'fair', 'poor', 'critical'
-    analysis_confidence REAL DEFAULT 0.0,        -- 0.0 to 1.0
-    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    analyzed_at TIMESTAMP
-);
-```
-
-#### Tabla: `parameters`
-```sql
-CREATE TABLE parameters (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    temperature REAL,
-    humidity REAL,
-    soil_moisture REAL,
-    -- Thresholds for alerts
-    min_temperature REAL,
-    max_temperature REAL,
-    min_humidity REAL,
-    max_humidity REAL,
-    min_soil_moisture REAL,
-    max_soil_moisture REAL
-);
-```
-
-## 🌐 Infraestructura de Red
-
-### VPC Design (10.0.0.0/16)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Internet Gateway                        │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-┌─────────────────┴───────────────────────────────────────────┐
-│              PUBLIC SUBNETS (Multi-AZ)                     │
-│  ┌─────────────────────┐  ┌─────────────────────────────┐    │
-│  │ us-east-1a          │  │ us-east-1b                  │    │  
-│  │ 10.0.1.0/24         │  │ 10.0.2.0/24                 │    │
-│  │ • NAT Gateway       │  │ • NAT Gateway               │    │
-│  │ • ALB Public        │  │ • ALB Public                │    │
-│  └─────────────────────┘  └─────────────────────────────┘    │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-┌─────────────────┴───────────────────────────────────────────┐
-│             PRIVATE SUBNETS (Application)                  │
-│  ┌─────────────────────┐  ┌─────────────────────────────┐    │
-│  │ us-east-1a          │  │ us-east-1b                  │    │
-│  │ 10.0.3.0/24         │  │ 10.0.4.0/24                 │    │
-│  │ • Fargate Tasks     │  │ • Fargate Tasks             │    │
-│  │ • Processing Engine │  │ • Processing Engine         │    │
-│  └─────────────────────┘  └─────────────────────────────┘    │
-└─────────────────┬───────────────────────────────────────────┘
-                  │
-┌─────────────────┴───────────────────────────────────────────┐
-│             DATABASE SUBNETS (Isolated)                    │
-│  ┌─────────────────────┐  ┌─────────────────────────────┐    │
-│  │ us-east-1a          │  │ us-east-1b                  │    │
-│  │ 10.0.5.0/24         │  │ 10.0.6.0/24                 │    │
-│  │ • RDS Primary       │  │ • RDS Standby               │    │
-│  │ • Multi-AZ          │  │ • Multi-AZ                  │    │
-│  └─────────────────────┘  └─────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Security Groups
-
-#### ALB Security Group
-```
-Ingress:
-- Port 80 from 0.0.0.0/0 (HTTP from internet)
-
-Egress:  
-- Port 8080 to Fargate SG (HTTP to containers)
-```
-
-#### Fargate Security Group
-```
-Ingress:
-- Port 8080 from ALB SG (HTTP from load balancer)
-
-Egress:
-- Port 443 to 0.0.0.0/0 (HTTPS to AWS APIs)
-- Port 5432 to RDS SG (PostgreSQL to database)
-```
-
-#### RDS Security Group  
-```
-Ingress:
-- Port 5432 from Fargate SG (PostgreSQL from containers)
-
-Egress:
-- None (database doesn't initiate outbound connections)
-```
-
-## 🚀 Servicios de Aplicación
-
-### ECS Fargate - Processing Engine
-
-**Configuración del Contenedor:**
-```yaml
-CPU: 512 units (0.5 vCPU)
-Memory: 1024 MB (1 GB)
-Platform: Linux x86_64
-Port: 8080
-Health Check: GET /health every 30s
-```
-
-**Variables de Entorno:**
-```bash
-AWS_DEFAULT_REGION=us-east-1
-SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/.../agrosynchro-processing-queue
-RAW_IMAGES_BUCKET=agrosynchro-raw-images
-PROCESSED_IMAGES_BUCKET=agrosynchro-processed-images
-DB_HOST=agrosynchro-postgres.xxxxx.us-east-1.rds.amazonaws.com
-DB_PORT=5432
-DB_NAME=agrosynchro
-DB_USER=agro
-DB_PASSWORD=[from Secrets Manager]
-```
-
-**Auto Scaling:**
-```yaml
-Min Capacity: 1 task
-Max Capacity: 10 tasks
-Target CPU: 70%
-Scale Out: +1 task if CPU > 70% for 2 minutes
-Scale In: -1 task if CPU < 50% for 5 minutes
-```
-
-### RDS PostgreSQL
-
-**Configuración:**
-```yaml
-Engine: PostgreSQL 15.8
-Instance Class: db.t3.micro (AWS Academy)
-Storage: 20GB GP3 SSD, encrypted
-Multi-AZ: Enabled (automatic failover)
-Backup: 7 days retention
-Maintenance: Sunday 04:00-05:00 UTC
-Parameter Group: Custom (logging enabled)
-```
-
-**Conexión:**
-```yaml
-Endpoint: agrosynchro-postgres.xxxxx.us-east-1.rds.amazonaws.com
-Port: 5432
-Database: agrosynchro
-Username: agro
-Password: Stored in AWS Secrets Manager
-SSL: Required
-```
-
-### SQS + Dead Letter Queue
-
-**Main Queue: `agrosynchro-processing-queue`**
-```yaml
-Message Retention: 14 days
-Visibility Timeout: 300 seconds (5 minutes)
-Max Receive Count: 3 attempts
-Dead Letter Queue: agrosynchro-dlq
-Encryption: AES-256-GCM
-FIFO: No (standard queue for higher throughput)
-```
-
-**Dead Letter Queue: `agrosynchro-dlq`**
-```yaml
-Message Retention: 14 days
-Purpose: Failed messages after 3 attempts
-Monitoring: CloudWatch alarms on message count
-```
-
-### S3 Buckets
-
-**Raw Images: `agrosynchro-raw-images`**
-```yaml
-Versioning: Enabled
-Encryption: AES-256
-Lifecycle: Delete versions > 30 days
-Access: Private (Fargate and Lambda only)
-```
-
-**Processed Images: `agrosynchro-processed-images`**  
-```yaml
-Versioning: Enabled
-Encryption: AES-256
-Lifecycle: Delete versions > 90 days
-Access: Private (Fargate only)
-```
-
-## 📊 Monitoreo y Observabilidad
-
-### CloudWatch Metrics
-
-**API Gateway:**
-- Request count and latency
-- 4XX/5XX error rates
-- Throttling events
-
-**ECS Fargate:**
-- CPU and memory utilization
-- Task count and health
-- Container restart events
-
-**RDS:**
-- Connection count
-- Query performance
-- Storage utilization
-
-**SQS:**
-- Messages sent/received
-- Queue depth
-- Dead letter queue messages
-
-### CloudWatch Logs
-
-```
-/aws/apigateway/agrosynchro     - API Gateway access logs
-/aws/ecs/agrosynchro-processing - Fargate container logs  
-/aws/lambda/agrosynchro-upload  - Lambda execution logs
-/aws/rds/instance/.../postgresql - Database logs
-```
-
-### Health Checks
-
-**ALB Target Health:**
-- Path: `GET /health`
-- Interval: 30 seconds
-- Timeout: 5 seconds
-- Healthy threshold: 2 consecutive successes
-- Unhealthy threshold: 2 consecutive failures
-
-**Application Health Check Response:**
-```json
-{
-  "status": "healthy",
-  "timestamp": "2023-12-01T14:30:22Z",
-  "uptime_seconds": 3600,
-  "database_connected": true,
-  "database_migrations": "completed",
-  "sqs_accessible": true,
-  "s3_accessible": true
-}
-```
-
-## 🔐 Seguridad y Compliance
-
-### Encryption
-
-**In Transit:**
-- HTTPS/TLS 1.2+ for all API communications
-- VPC internal traffic over private subnets
-
-**At Rest:**
-- RDS: AES-256 encryption with AWS managed keys
-- S3: AES-256 server-side encryption
-- SQS: AES-256-GCM encryption
-
-### Access Control
-
-**IAM Strategy:**
-- AWS Academy: Using LabRole with broad permissions
-- Production: Would use least-privilege custom roles
-
-**Network Security:**
-- VPC with no direct internet access to private resources
-- Security groups with minimal required ports
-- Database in isolated subnet group
-
-**Secrets Management:**
-- Database passwords in AWS Secrets Manager
-- No hardcoded credentials in code or containers
-- Automatic password rotation (configurable)
-
-## 🚀 Deployment Strategy
-
-### Infrastructure as Code (Terraform)
-
-**Modules:**
-```
-terraform/
-├── main.tf                    # Root configuration
-├── modules/
-│   ├── networking/           # VPC, subnets, gateways
-│   ├── api-gateway/          # API Gateway and Lambda
-│   ├── sqs/                 # SQS queues and policies
-│   ├── s3/                  # S3 buckets and policies
-│   ├── rds/                 # PostgreSQL database
-│   ├── fargate/             # ECS cluster and services
-│   └── lambda/              # Image upload function
-└── environments/
-    └── aws/
-        └── terraform.tfvars  # Environment variables
-```
-
-### Automated Deployment
-
-**deploy.sh workflow:**
-1. Prerequisites validation (AWS CLI, Docker, Terraform)
-2. Terraform init and plan
-3. Infrastructure deployment
-4. Docker image build and ECR push
-5. ECS service update with new image
-6. Database migrations (automatic on container startup)
-7. Endpoint validation and testing
-
-### Database Migrations
-
-**Automatic Migration Strategy:**
-- Migrations run on container startup
-- Idempotent SQL scripts (CREATE IF NOT EXISTS)
-- No manual intervention required
-- Logged to CloudWatch for auditing
-
-## 📈 Escalabilidad y Performance
-
-### Capacity Planning
-
-**Current Configuration (AWS Academy):**
-- Fargate: 1-10 tasks (0.5 CPU, 1GB RAM each)
-- RDS: db.t3.micro (1 vCPU, 1GB RAM)
-- SQS: Standard queue (unlimited throughput)
-
-**Production Scaling:**
-- Fargate: 2-50 tasks with larger CPU/memory
-- RDS: db.t3.medium+ with read replicas
-- API Gateway: Regional deployment with caching
-- CloudFront: CDN for static assets
-
-### Performance Optimizations
-
-**Current:**
-- SQS batch processing for efficiency
-- Database connection pooling
-- S3 multipart uploads for large images
-- ECS auto-scaling based on CPU metrics
-
-**Future Enhancements:**
-- Redis caching layer for frequent queries
-- Database query optimization and indexing
-- Image processing optimization (thumbnails, compression)
-- API response caching with ElastiCache
-
-## 🔧 Troubleshooting Guide
-
-### Common Issues
-
-**Database Connection Failures:**
-```bash
-# Check RDS status
-aws rds describe-db-instances --db-instance-identifier agrosynchro-postgres
-
-# Check security group rules
-aws ec2 describe-security-groups --filters "Name=group-name,Values=agrosynchro-rds-sg"
-
-# Test from Fargate container
-curl http://alb-dns-name/health
-```
-
-**SQS Message Processing Delays:**
-```bash
-# Check queue depth
-aws sqs get-queue-attributes --queue-url $SQS_QUEUE_URL --attribute-names All
-
-# Check dead letter queue
-aws sqs get-queue-attributes --queue-url $DLQ_URL --attribute-names All
-
-# Scale up Fargate manually if needed
-aws ecs update-service --cluster agrosynchro-cluster --service agrosynchro-processing-engine --desired-count 3
-```
-
-**ALB Health Check Failures:**
-```bash
-# Check target health
-aws elbv2 describe-target-health --target-group-arn $TARGET_GROUP_ARN
-
-# Check Fargate task health
-aws ecs describe-services --cluster agrosynchro-cluster --services agrosynchro-processing-engine
-
-# View container logs
-aws logs tail /aws/ecs/agrosynchro-processing-engine --follow
-```
-
-Esta arquitectura proporciona una base sólida y escalable para AgroSynchro, separando claramente las responsabilidades y permitiendo el crecimiento futuro de la plataforma.
+# Arquitectura del Proyecto (Terraform)
+
+Este documento describe la estructura del código Terraform utilizado para desplegar la infraestructura de `agrosynchro` en AWS.
+
+## Descripción de Módulos
+
+El proyecto utiliza una [arquitectura modular](https://developer.hashicorp.com/terraform/language/modules) para organizar y reutilizar la configuración. El archivo `main.tf` de la raíz actúa como el orquestador principal, instanciando los siguientes módulos:
+
+  * `modules/networking`:
+
+      * **Propósito:** Crea la base de la red.
+      * **Recursos Clave:** Define la **VPC**, las **Subredes** (Públicas, Privadas y de Base de Datos) distribuidas en dos Zonas de Disponibilidad, **Route Tables**, un **Internet Gateway (IGW)** para las subredes públicas, y **NAT Gateways** para que las subredes privadas tengan salida a internet. También incluye el **VPC Endpoint** para S3.
+
+  * `modules/s3`:
+
+      * **Propósito:** Gestiona todo el almacenamiento de objetos.
+      * **Recursos Clave:** Crea tres buckets:
+        1.  `frontend`: Bucket público con *static website hosting* habilitado para la aplicación web.
+        2.  `raw_images`: Bucket privado para imágenes crudas.
+        3.  `processed_images`: Bucket privado para imágenes procesadas.
+
+  * `modules/rds`:
+
+      * **Propósito:** Despliega la base de datos relacional.
+      * **Recursos Clave:** Crea una instancia **RDS PostgreSQL** (`aws_db_instance`) configurada como `multi_az = true` para alta disponibilidad. También crea una **Réplica de Lectura (Read Replica)** en la AZ opuesta para descargar consultas. Se ejecuta en las subredes de Base de Datos.
+
+  * `modules/sqs`:
+
+      * **Propósito:** Provee un sistema de colas de mensajes para desacoplar servicios.
+      * **Recursos Clave:** Crea una cola **SQS** estándar para recibir mensajes (ej. desde la API) y una **Dead Letter Queue (DLQ)** asociada para manejar mensajes fallidos.
+
+  * `modules/lambda`:
+
+      * **Propósito:** Define todas las funciones de cómputo *serverless*.
+      * **Recursos Clave:** Empaqueta y despliega múltiples funciones Lambda. Las funciones principales (API, reports, etc.) se configuran para ejecutarse *dentro* de la VPC (en las subredes privadas) para tener acceso seguro a la base de datos RDS.
+
+  * `modules/fargate`:
+
+      * **Propósito:** Ejecuta el servicio de procesamiento de larga duración.
+      * **Recursos Clave:** Define un clúster de **ECS** y un servicio de **Fargate** (`processing-engine`).
+
+  * `modules/api-gateway`:
+
+      * **Propósito:** Actúa como la puerta de entrada (frontend) para toda la lógica de backend.
+      * **Recursos Clave:** Define el `aws_api_gateway_rest_api` y sus *endpoints* (`/users`, `/reports`, `/messages`, etc.). Configura las integraciones para cada ruta, apuntando a:
+          * **AWS Lambda** (para la mayoría de las rutas de la API).
+          * **AWS SQS** (para la ruta `/messages`).
+
+  * `modules/cognito`:
+
+      * **Propósito:** Maneja la autenticación y gestión de usuarios.
+      * **Recursos Clave:** Crea un **Cognito User Pool** y un **User Pool Client** para permitir el registro y login de usuarios a través de la interfaz web.
+
+-----
+
+## Funciones y Meta-Argumentos Clave
+
+Para que la infraestructura sea dinámica y robusta, se utilizan varias funciones y meta-argumentos de Terraform.
+
+### Funciones (Functions)
+
+Las funciones se usan para transformar o combinar datos.
+
+  * `jsonencode()`:
+
+      * **Uso:** Convierte una estructura de HCL (como un `map` o `list`) en una cadena de texto JSON.
+      * **Ejemplo (`modules/fargate/main.tf`):**
+        ```terraform
+        container_definitions = jsonencode([
+          {
+            name  = "processing-engine"
+            image = "${aws_ecr_repository.processing_engine.repository_url}:latest"
+            # ...
+          }
+        ])
+        ```
+
+  * `split()`:
+
+      * **Uso:** Divide una cadena de texto en una lista, usando un delimitador.
+      * **Ejemplo (`main.tf`):**
+        ```terraform
+        module "fargate" {
+          # ...
+          rds_endpoint = split(":", module.rds.db_instance_endpoint)[0]
+        }
+        ```
+        *En este caso, se usa para quitar el puerto (ej. `:5432`) del *endpoint* de RDS y pasar solo el hostname al contenedor de Fargate.*
+
+  * `fileset()` y `filemd5()`:
+
+      * **Uso:** `fileset` genera una lista de archivos en un directorio, y `filemd5` calcula el hash de un archivo.
+      * **Ejemplo (`modules/s3/main.tf`):**
+        ```terraform
+        resource "aws_s3_object" "frontend_files" {
+          for_each = setsubtract(fileset("${path.root}/../services/web-dashboard/frontend/build", "**/*"), ["env.js"])
+          # ...
+          etag = filemd5("${path.root}/../services/web-dashboard/frontend/build/${each.value}")
+        }
+        ```
+        *Esto sube todos los archivos del *build* del frontend a S3 y usa el hash `etag` para reemplazar solo los archivos que cambiaron.*
+
+### Meta-Argumentos
+
+Los meta-argumentos cambian el comportamiento de cómo Terraform crea, gestiona o destruye los recursos.
+
+  * `depends_on`:
+
+      * **Uso:** Fuerza a Terraform a esperar a que un recurso o módulo se cree antes de intentar crear otro. Se usa para dependencias implícitas.
+      * **Ejemplo (`main.tf`):**
+        ```terraform
+        module "lambda" {
+          source = "./modules/lambda"
+          # ...
+          vpc_id            = module.networking.vpc_id
+          private_subnets   = module.networking.private_subnet_ids
+          db_host           = split(":", module.rds.db_instance_endpoint)[0]
+          
+          depends_on = [module.s3, module.networking, module.rds]
+        }
+        ```
+        *Aunque Terraform puede inferir la dependencia de `networking` y `rds` (porque se usan sus `outputs`), `depends_on` se usa aquí para asegurar explícitamente que la red, la DB y S3 estén 100% listos antes de intentar crear las Lambdas.*
+
+  * `count`:
+
+      * **Uso:** Crea múltiples copias de un recurso (o módulo) basado en un número.
+      * **Ejemplo (`modules/networking/main.tf`):**
+        ```terraform
+        resource "aws_subnet" "public" {
+          count = length(var.public_subnet_cidrs)
+
+          vpc_id     = aws_vpc.main.id
+          cidr_block = var.public_subnet_cidrs[count.index]
+          # ...
+        }
+        ```
+        *Esto crea tantas subredes públicas como CIDRs se hayan definido en la variable (en tu caso, 2, una para cada AZ).*
+
+  * `for_each`:
+
+      * **Uso:** Similar a `count`, pero itera sobre un `map` o `set` de strings. Es más flexible porque el `key` del ítem se usa en el identificador del recurso.
+      * **Ejemplo (`modules/s3/main.tf`):**
+        ```terraform
+        resource "aws_s3_object" "frontend_files" {
+          for_each = setsubtract(fileset(...), ["env.js"])
+
+          bucket = aws_s3_bucket.frontend.id
+          key    = each.value
+          source = "${path.root}/../services/web-dashboard/frontend/build/${each.value}"
+          # ...
+        }
+        ```
+        *Esto crea un recurso `aws_s3_object` por *cada archivo* encontrado en el `fileset`, usando el nombre del archivo (`each.value`) como `key`.*
+
+  * `lifecycle`:
+
+      * **Uso:** Permite un control detallado sobre el ciclo de vida del recurso.
+      * **Ejemplo (`modules/fargate/main.tf`):**
+        ```terraform
+        resource "aws_ecs_service" "processing_engine" {
+          # ...
+          desired_count = var.fargate_desired_count
+
+          lifecycle {
+            ignore_changes = [desired_count]
+          }
+        }
+        ```
+        *Esto es **muy importante**: le dice a Terraform que *ignore* si el `desired_count` (número de tareas) cambia. Esto es fundamental para permitir que el **Auto Scaling** de AWS escale el servicio hacia arriba o abajo sin que Terraform, en el próximo `apply`, intente volver a ponerlo en el valor original.*
