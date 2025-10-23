@@ -1,42 +1,48 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# =============================================================================
-# BUILD AND DEPLOY TO ECR - Simple Version
-# =============================================================================
-# Builds Docker image and deploys to AWS ECR
-# Usage: ./build-and-deploy.sh
-# =============================================================================
+# 📁 Directorio del script actual
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-set -e
+echo "🚀 Building and deploying Processing Engine..."
 
-PROJECT_NAME="agrosynchro"
-SERVICE_NAME="processing-engine"
-IMAGE_NAME="${PROJECT_NAME}-${SERVICE_NAME}"
+AWS_REGION="us-east-1"
+ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+ECR_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+IMAGE_NAME="agrosynchro-processing-engine"
+IMAGE_TAG="latest"
 
-echo "🚀 Starting ECR deployment for $IMAGE_NAME"
+# Crear ECR si no existe
+if ! aws ecr describe-repositories --repository-names "$IMAGE_NAME" >/dev/null 2>&1; then
+  echo "🆕 Creando repositorio ECR: $IMAGE_NAME"
+  aws ecr create-repository --repository-name "$IMAGE_NAME" >/dev/null
+  echo "✅ Repositorio ECR creado"
+else
+  echo "✅ Repositorio ECR ya existe"
+fi
 
-# Get AWS account and region
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-AWS_REGION=${AWS_REGION:-us-east-1}
-ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-REPOSITORY_NAME="${PROJECT_NAME}-${SERVICE_NAME}"
-IMAGE_TAG="${ECR_REGISTRY}/${REPOSITORY_NAME}:latest"
 
-echo "📦 Building Docker image for x86_64..."
-docker build --platform linux/amd64 -t $IMAGE_NAME:latest .
-docker tag $IMAGE_NAME:latest $IMAGE_TAG
 
-echo "🔧 Setting up ECR..."
-aws ecr create-repository --repository-name $REPOSITORY_NAME --region $AWS_REGION 2>/dev/null || true
-
+# 🔐 Login seguro a ECR
 echo "🔐 Logging into ECR..."
-aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+DOCKER_CONFIG_FILE="$HOME/.docker/config.json"
+if [ -f "$DOCKER_CONFIG_FILE" ]; then
+  jq 'del(.credsStore, .credHelpers)' "$DOCKER_CONFIG_FILE" > "${DOCKER_CONFIG_FILE}.tmp" && mv "${DOCKER_CONFIG_FILE}.tmp" "$DOCKER_CONFIG_FILE"
+else
+  mkdir -p "$HOME/.docker"
+  echo '{}' > "$DOCKER_CONFIG_FILE"
+fi
 
-echo "⬆️  Pushing image..."
-docker push $IMAGE_TAG
+aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_URL"
+echo "✅ Logged into ECR successfully."
 
-echo "🧹 Cleaning up..."
-docker rmi $IMAGE_NAME:latest 2>/dev/null || true
-docker rmi $IMAGE_TAG 2>/dev/null || true
+# 🏗️ Build Docker image
+echo "🐳 Building Docker image..."
+docker build -t "${IMAGE_NAME}:${IMAGE_TAG}" "$SCRIPT_DIR"
 
-echo "✅ Done! Image deployed to: $IMAGE_TAG"
+# 🏷️ Tag and push image
+echo "📦 Tagging and pushing image to ECR..."
+docker tag "${IMAGE_NAME}:${IMAGE_TAG}" "${ECR_URL}/${IMAGE_NAME}:${IMAGE_TAG}"
+docker push "${ECR_URL}/${IMAGE_NAME}:${IMAGE_TAG}"
+
+echo "✅ Processing Engine built and pushed successfully to ECR."
