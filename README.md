@@ -195,3 +195,7 @@ Flujo de datos
 	4.	Los resultados se guardan en el bucket S3 (imágenes procesadas) y los metadatos se almacenan en RDS.
 	5.	El frontend, alojado en el bucket S3 público, obtiene información a través del API Gateway.
 	6.	El tráfico interno entre los servicios se mantiene dentro de la VPC y se enruta mediante el VPC Endpoint.
+
+
+
+<img width="757" height="735" alt="image" src="https://github.com/user-attachments/assets/dd3e19b7-1bc6-4406-b067-b623e8a751b3" />
