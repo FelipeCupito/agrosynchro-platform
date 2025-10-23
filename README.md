@@ -64,7 +64,7 @@ cd terraform
 ```bash
 ./deploy_app.sh
 ```
-
+En caso de que falle, volver a correrlo. 
 ### 6. **Ejecutar Simulador:**
 Una vez levantada la aplicacion, iniciar sesion, y en la nav bar se vera el numero de id del usuario
 ```bash
