@@ -5,6 +5,9 @@ from cors_headers import add_cors_headers
 
 
 def lambda_handler(event, context):
+    if event.get("httpMethod") == "OPTIONS":
+        return add_cors_headers({"statusCode": 200, "body": ""})
+    
     db_host = os.environ.get("DB_HOST")
     db_name = os.environ.get("DB_NAME", "sensordb")
     db_user = os.environ.get("DB_USER", "postgres")
