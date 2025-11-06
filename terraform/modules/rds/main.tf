@@ -19,7 +19,7 @@ data "aws_region" "current" {}
 # =============================================================================
 
 resource "aws_db_subnet_group" "main" {
-  name       = "${var.project_name}-db-subnet-group"
+  name       = "${var.project_name}-db-subnet-group-v2"
   subnet_ids = var.private_subnet_ids
 
   tags = {
@@ -32,7 +32,7 @@ resource "aws_db_subnet_group" "main" {
 # =============================================================================
 
 resource "aws_security_group" "rds" {
-  name        = "${var.project_name}-rds-sg"
+  name        = "${var.project_name}-rds-sg-v2"
   description = "Security group for RDS PostgreSQL"
   vpc_id      = var.vpc_id
 
@@ -61,12 +61,13 @@ resource "aws_security_group" "rds" {
 # =============================================================================
 
 resource "aws_db_parameter_group" "postgresql" {
-  family = "postgres15"
-  name   = "${var.project_name}-postgres-params"
+  family = "postgres17"
+  name   = "${var.project_name}-postgres-params-v1"
 
   parameter {
     name  = "shared_preload_libraries"
     value = "pg_stat_statements"
+    apply_method = "pending-reboot"
   }
 
   parameter {
@@ -91,7 +92,7 @@ resource "aws_db_parameter_group" "postgresql" {
 resource "aws_db_instance" "main" {
   identifier     = "${var.project_name}-postgres"
   engine         = "postgres"
-  engine_version = "15.8"
+  engine_version = "17.4"
   instance_class = var.db_instance_class
 
   allocated_storage     = var.db_allocated_storage
@@ -140,7 +141,7 @@ resource "aws_db_instance" "main" {
 resource "aws_db_instance" "read_replica" {
   count = var.create_read_replica ? 1 : 0
 
-  identifier                = "${var.project_name}-postgres-replica"
+  identifier                = "${var.project_name}-postgres-replica-v2"
   replicate_source_db       = aws_db_instance.main.identifier
   instance_class            = var.replica_instance_class
   auto_minor_version_upgrade = false
@@ -165,51 +166,6 @@ resource "aws_db_instance" "read_replica" {
   }
 }
 
-# =============================================================================
-# ENHANCED MONITORING IAM ROLE - DISABLED FOR AWS ACADEMY
-# =============================================================================
-# Enhanced Monitoring requires service-linked roles which may not be available in AWS Academy
-# resource "aws_iam_role" "rds_monitoring" {
-#   count = var.monitoring_interval > 0 ? 1 : 0
-#   name  = "${var.project_name}-rds-monitoring-role"
-#
-#   assume_role_policy = jsonencode({
-#     Version = "2012-10-17"
-#     Statement = [
-#       {
-#         Action = "sts:AssumeRole"
-#         Effect = "Allow"
-#         Principal = {
-#           Service = "monitoring.rds.amazonaws.com"
-#         }
-#       }
-#     ]
-#   })
-# }
-#
-# resource "aws_iam_role_policy_attachment" "rds_monitoring" {
-#   count      = var.monitoring_interval > 0 ? 1 : 0
-#   role       = aws_iam_role.rds_monitoring[0].name
-#   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
-# }
-
-# =============================================================================
-# CLOUDWATCH LOG GROUPS
-# =============================================================================
-
-# CloudWatch Log Group - RDS creates this automatically
-# resource "aws_cloudwatch_log_group" "postgresql" {
-#   name              = "/aws/rds/instance/${aws_db_instance.main.identifier}/postgresql"
-#   retention_in_days = 14
-# 
-#   lifecycle {
-#     ignore_changes = [name]
-#   }
-# 
-#   tags = {
-#     Name = "${var.project_name}-postgres-logs"
-#   }
-# }
 
 resource "aws_cloudwatch_log_group" "upgrade" {
   name              = "/aws/rds/instance/${aws_db_instance.main.identifier}/upgrade"
