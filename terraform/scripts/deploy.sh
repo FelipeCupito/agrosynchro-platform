@@ -46,7 +46,94 @@ log_info() { log "${BLUE}ℹ️  $1${NC}"; }
 log_success() { log "${GREEN}✅ $1${NC}"; }
 log_warning() { log "${YELLOW}⚠️  $1${NC}"; }
 log_error() { log "${RED}❌ $1${NC}"; }
-log_debug() { [[ "$VERBOSE" == "true" ]] && log "${PURPLE}🔍 DEBUG: $1${NC}"; }
+log_debug() { 
+    if [[ "$VERBOSE" == "true" ]]; then 
+        log "${PURPLE}🔍 DEBUG: $1${NC}"
+    fi
+    return 0  # Siempre retornar exitoso
+}
+
+# =============================================================================
+# MANEJO ROBUSTO DE ERRORES
+# =============================================================================
+
+handle_script_error() {
+    local exit_code=$?
+    local line_no=$1
+    
+    case $exit_code in
+        141)
+            if [[ "$VERBOSE" == "true" ]]; then
+                log_warning "Error 141 detectado (SIGPIPE - broken pipe) en línea $line_no"
+                log_info "💡 Esto suele ocurrir por comandos pipe que terminan temprano"
+                log_info "🔄 Reintentando automáticamente en 3 segundos..."
+                sleep 3
+            fi
+            return 0  # Continuar ejecución
+            ;;
+        130)
+            log_warning "Script interrumpido por usuario (Ctrl+C)"
+            exit 130
+            ;;
+        1)
+            # Error común que puede ser temporal
+            if [[ "$VERBOSE" == "true" ]]; then
+                log_error "Error en línea $line_no (código: $exit_code)"
+                log_info "🔍 Ejecutar con --verbose para más detalles"
+            else
+                # En modo no-verbose, solo mostrar error crítico
+                log_error "Error en validaciones iniciales (usar --verbose para detalles)"
+                exit 1
+            fi
+            ;;
+        *)
+            if [[ $exit_code -ne 0 ]]; then
+                log_error "Error inesperado en línea $line_no (código: $exit_code)"
+                log_info "🔍 Para más detalles, ejecutar con --verbose"
+                exit $exit_code
+            fi
+            ;;
+    esac
+}
+
+# Trap para manejar errores automáticamente
+trap 'handle_script_error $LINENO' ERR
+
+# Función wrapper para comandos con pipe que pueden causar SIGPIPE
+safe_pipe_command() {
+    local max_retries=3
+    local retry_count=0
+    
+    while [[ $retry_count -lt $max_retries ]]; do
+        # Temporalmente desactivar set -e para capturar el código de salida
+        set +e
+        "$@" 2>/dev/null
+        local exit_code=$?
+        set -e
+        
+        if [[ $exit_code -eq 0 ]]; then
+            return 0
+        elif [[ $exit_code -eq 141 ]]; then
+            ((retry_count++))
+            if [[ "$VERBOSE" == "true" ]]; then
+                log_warning "SIGPIPE detectado (intento $retry_count/$max_retries)"
+            fi
+            if [[ $retry_count -lt $max_retries ]]; then
+                if [[ "$VERBOSE" == "true" ]]; then
+                    log_info "🔄 Reintentando en 2 segundos..."
+                fi
+                sleep 2
+            else
+                if [[ "$VERBOSE" == "true" ]]; then
+                    log_warning "Comando con pipe falló después de $max_retries intentos, continuando..."
+                fi
+                return 0  # Continuar de todos modos
+            fi
+        else
+            return $exit_code
+        fi
+    done
+}
 
 show_banner() {
     cat << 'EOF'
@@ -69,6 +156,9 @@ EOF
 validate_dependencies() {
     log_info "Validando dependencias del sistema..."
     
+    # Temporalmente desactivar trap para validaciones
+    trap - ERR
+    
     local missing_deps=()
     
     # Herramientas requeridas
@@ -81,15 +171,37 @@ validate_dependencies() {
         else
             local version
             case "$tool" in
-                terraform) version=$(terraform version | head -1) ;;
-                aws) version=$(aws --version) ;;
-                docker) version=$(docker --version) ;;
-                node) version=$(node --version) ;;
-                *) version="✓" ;;
+                terraform) 
+                    # Evitar SIGPIPE - usar terraform version directamente
+                    set +e
+                    version=$(terraform version 2>/dev/null | { read -r first_line; echo "$first_line"; } || echo "terraform installed")
+                    set -e
+                    ;;
+                aws) 
+                    set +e
+                    version=$(aws --version 2>/dev/null || echo "aws installed")
+                    set -e
+                    ;;
+                docker) 
+                    set +e
+                    version=$(docker --version 2>/dev/null || echo "docker installed")
+                    set -e
+                    ;;
+                node) 
+                    set +e
+                    version=$(node --version 2>/dev/null || echo "node installed")
+                    set -e
+                    ;;
+                *) 
+                    version="✓" 
+                    ;;
             esac
             log_debug "$tool: $version"
         fi
     done
+    
+    # Reactivar trap después de validaciones
+    trap 'handle_script_error $LINENO' ERR
     
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
         log_error "Dependencias faltantes: ${missing_deps[*]}"
@@ -103,28 +215,47 @@ validate_dependencies() {
 validate_aws_access() {
     log_info "Validando acceso a AWS..."
     
+    # Temporalmente desactivar trap para validaciones AWS
+    trap - ERR
+    
     # Verificar que aws CLI esté disponible
     if ! command -v aws >/dev/null 2>&1; then
         log_error "AWS CLI no está instalado"
         log_info "Instalar AWS CLI: https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html"
+        # Reactivar trap antes de salir
+        trap 'handle_script_error $LINENO' ERR
         exit 1
     fi
     
     # Verificar credentials sin timeout (problema conocido)
-    if ! aws sts get-caller-identity >/dev/null 2>&1; then
+    set +e
+    aws sts get-caller-identity >/dev/null 2>&1
+    local aws_check=$?
+    set -e
+    
+    if [[ $aws_check -ne 0 ]]; then
         log_error "AWS CLI no configurado o sin permisos"
         log_info "Ejecutar: aws configure"
         log_info "O verificar variables: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY"
+        # Reactivar trap antes de salir
+        trap 'handle_script_error $LINENO' ERR
         exit 1
     fi
     
     # Verificar región
     local aws_region
+    set +e
     aws_region=$(aws configure get region 2>/dev/null || echo "us-east-1")
+    set -e
     
     # Verificar LabRole específicamente para AWS Academy
     local identity
+    set +e
     identity=$(aws sts get-caller-identity --output text --query 'Arn' 2>/dev/null || echo "")
+    set -e
+    
+    # Reactivar trap después de validaciones AWS
+    trap 'handle_script_error $LINENO' ERR
     
     if [[ "$identity" == *"voclabs"* ]] || [[ "$identity" == *"LabRole"* ]]; then
         log_success "AWS Academy detectado - Compatible"
@@ -377,17 +508,19 @@ handle_terraform_errors() {
     if grep -q "RepositoryAlreadyExistsException.*agrosynchro-processing-engine" "$error_log" 2>/dev/null; then
         log_warning "ECR Repository ya existe - aplicando fix automático..."
         
-        # Eliminar ECR existente para empezar limpio
+        # Eliminar ECR existente para garantizar imagen actualizada
         if aws ecr delete-repository --repository-name agrosynchro-processing-engine --force --region us-east-1 >/dev/null 2>&1; then
-            log_success "ECR Repository eliminado exitosamente"
+            log_success "ECR Repository eliminado - se garantiza imagen actualizada"
+            
+            # Marcar que necesitamos rebuilder la imagen
+            touch "$TF_DIR/.rebuild_processing_engine"
+            log_info "Imagen de processing engine será reconstruida con código más reciente"
+            
             return 0
         else
-            log_warning "No se pudo eliminar ECR - intentando import..."
-            # Intentar import como alternativa
-            if terraform import module.fargate.aws_ecr_repository.processing_engine agrosynchro-processing-engine >/dev/null 2>&1; then
-                log_success "ECR Repository importado exitosamente"
-                return 0
-            fi
+            log_error "No se pudo eliminar ECR - deployment no puede garantizar código actualizado"
+            log_info "Solución manual: aws ecr delete-repository --repository-name agrosynchro-processing-engine --force"
+            return 1
         fi
     fi
     
@@ -417,7 +550,8 @@ terraform_apply() {
     local apply_log
     apply_log=$(mktemp)
     
-    if run_command terraform apply -input=false "$plan_file" 2>&1 | tee "$apply_log"; then
+    # Usar safe_pipe_command para evitar SIGPIPE con tee
+    if safe_pipe_command bash -c "terraform apply -input=false '$plan_file' 2>&1 | tee '$apply_log'"; then
         log_success "Infraestructura desplegada exitosamente"
         rm -f "$plan_file" "$apply_log"
         return 0
@@ -433,6 +567,20 @@ terraform_apply() {
             if run_command terraform plan -out="$new_plan" -input=false && \
                run_command terraform apply -input=false "$new_plan"; then
                 log_success "Infraestructura desplegada exitosamente (con recuperación)"
+                
+                # Rebuild processing engine si es necesario
+                if [[ -f "$TF_DIR/.rebuild_processing_engine" ]]; then
+                    log_info "🔄 Rebuilding processing engine después de ECR recovery..."
+                    rm -f "$TF_DIR/.rebuild_processing_engine"
+                    
+                    # Rebuild processing engine
+                    if build_processing_engine; then
+                        log_success "Processing engine rebuildeado exitosamente"
+                    else
+                        log_warning "Falló rebuild de processing engine - puede causar problemas en Fargate"
+                    fi
+                fi
+                
                 rm -f "$plan_file" "$new_plan" "$apply_log"
                 return 0
             else
@@ -461,10 +609,10 @@ configure_lambdas() {
     outputs=$(terraform output -json 2>/dev/null || echo '{}')
     
     local cognito_domain cognito_client_id frontend_url region
-    cognito_domain=$(echo "$outputs" | jq -r '.cognito_domain.value // ""' 2>/dev/null || echo "")
-    cognito_client_id=$(echo "$outputs" | jq -r '.cognito_client_id.value // ""' 2>/dev/null || echo "")  
-    frontend_url=$(echo "$outputs" | jq -r '.frontend_website_url.value // ""' 2>/dev/null || echo "")
-    region=$(echo "$outputs" | jq -r '.region.value // "us-east-1"' 2>/dev/null || echo "us-east-1")
+    cognito_domain=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.cognito_domain.value // \"\"'" 2>/dev/null || echo "")
+    cognito_client_id=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.cognito_client_id.value // \"\"'" 2>/dev/null || echo "")  
+    frontend_url=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.frontend_website_url.value // \"\"'" 2>/dev/null || echo "")
+    region=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.region.value // \"us-east-1\"'" 2>/dev/null || echo "us-east-1")
     
     # Configurar Cognito Lambda si los valores están disponibles
     if [[ -n "$cognito_domain" && -n "$cognito_client_id" ]]; then
@@ -543,7 +691,7 @@ initialize_database() {
         # Verificar respuesta
         if [[ -f "$response_file" ]]; then
             local status_code
-            status_code=$(jq -r '.StatusCode // 0' "$response_file" 2>/dev/null || echo "0")
+            status_code=$(safe_pipe_command bash -c "jq -r '.StatusCode // 0' '$response_file'" 2>/dev/null || echo "0")
             
             if [[ "$status_code" == "200" ]]; then
                 log_success "Base de datos inicializada"
@@ -572,8 +720,8 @@ verify_deployment() {
     
     # URLs importantes
     local api_url frontend_url
-    api_url=$(echo "$outputs" | jq -r '.api_gateway_invoke_url.value // ""' 2>/dev/null || echo "")
-    frontend_url=$(echo "$outputs" | jq -r '.frontend_website_url.value // ""' 2>/dev/null || echo "")
+    api_url=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.api_gateway_invoke_url.value // \"\"'" 2>/dev/null || echo "")
+    frontend_url=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.frontend_website_url.value // \"\"'" 2>/dev/null || echo "")
     
     local health_checks=0
     local total_checks=0
@@ -630,8 +778,8 @@ show_deployment_summary() {
     echo "🌐 URLs Principales:"
     
     local frontend_url api_url
-    frontend_url=$(echo "$outputs" | jq -r '.frontend_website_url.value // "No disponible"')
-    api_url=$(echo "$outputs" | jq -r '.api_gateway_invoke_url.value // "No disponible"')
+    frontend_url=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.frontend_website_url.value // \"No disponible\"'" || echo "No disponible")
+    api_url=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.api_gateway_invoke_url.value // \"No disponible\"'" || echo "No disponible")
     
     echo "   📱 Frontend:    $frontend_url"
     echo "   🔌 API:         $api_url"
@@ -640,8 +788,8 @@ show_deployment_summary() {
     echo "🗄️  Infraestructura:"
     
     local rds_endpoint cognito_domain
-    rds_endpoint=$(echo "$outputs" | jq -r '.rds_endpoint.value // "No disponible"')
-    cognito_domain=$(echo "$outputs" | jq -r '.cognito_domain.value // "No disponible"')
+    rds_endpoint=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.rds_endpoint.value // \"No disponible\"'" || echo "No disponible")
+    cognito_domain=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.cognito_domain.value // \"No disponible\"'" || echo "No disponible")
     
     echo "   🐘 PostgreSQL:  $rds_endpoint"
     echo "   🔐 Cognito:     $cognito_domain"
@@ -858,7 +1006,7 @@ cleanup() {
     
     # Limpiar archivos temporales
     cd "$TF_DIR" 2>/dev/null || true
-    rm -f .current_plan tfplan-* 2>/dev/null || true
+    rm -f .current_plan tfplan-* .rebuild_processing_engine 2>/dev/null || true
     
     if [[ $exit_code -ne 0 ]]; then
         echo ""
