@@ -24,8 +24,8 @@ variable "raw_images_bucket_name" {
   type        = string
 }
 
-variable "images_bucket_name" {
-  description = "Name of the S3 bucket used by API Lambdas"
+variable "processed_images_bucket_name" {
+  description = "Name of the S3 bucket for processed images used by API Lambdas"
   type        = string
   default     = ""
 }

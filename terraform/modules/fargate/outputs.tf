@@ -43,17 +43,3 @@ output "execution_role_arn" {
   value       = data.aws_iam_role.task_execution.arn
 }
 
-output "alb_dns_name" {
-  description = "ALB DNS name"
-  value       = aws_lb.fargate.dns_name
-}
-
-output "alb_zone_id" {
-  description = "ALB zone ID"
-  value       = aws_lb.fargate.zone_id
-}
-
-output "alb_arn" {
-  description = "ALB ARN"
-  value       = aws_lb.fargate.arn
-}

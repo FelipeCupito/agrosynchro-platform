@@ -1,108 +1,135 @@
-# =============================================================================
-# AGROSYNCHRO INFRASTRUCTURE - MAIN CONFIGURATION
-# =============================================================================
 
-# Data sources
 data "aws_caller_identity" "current" {}
 
-# Local variables
+data "aws_iam_role" "lab_role" {
+  name = "LabRole"
+}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
 locals {
   project_name = "agrosynchro"
   environment  = "aws"
   region       = var.aws_region
-  
-  # Tags comunes para todos los recursos
+
+  # Tags base comunes
   common_tags = {
     Project     = local.project_name
     Environment = local.environment
     ManagedBy   = "terraform"
+    CreatedAt   = formatdate("YYYY-MM-DD", timestamp())
+  }
+
+  # Definir componentes para usar con for_each
+  infrastructure_components = {
+    vpc = {
+      name = "${local.project_name}-vpc"
+      type = "networking"
+    }
+    lambda = {
+      name = "${local.project_name}-lambda"
+      type = "compute"
+    }
+    rds = {
+      name = "${local.project_name}-database"
+      type = "storage"
+    }
+    s3 = {
+      name = "${local.project_name}-storage"
+      type = "storage"
+    }
   }
 }
 
-# =============================================================================
-# NETWORKING MODULE
-# =============================================================================
-module "networking" {
-  source = "./modules/networking"
-  
-  project_name         = local.project_name
-  region              = local.region
-  vpc_cidr            = var.vpc_cidr_block
-  public_subnet_cidrs = [var.public_subnet_1_cidr, var.public_subnet_2_cidr]
-  private_subnet_cidrs = [var.private_subnet_1_cidr, var.private_subnet_2_cidr]
-  db_subnet_cidrs     = [var.db_subnet_1_cidr, var.db_subnet_2_cidr]
-  availability_zones  = ["${local.region}a", "${local.region}b"]
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.0"
+
+  name = local.project_name
+  cidr = var.vpc_cidr_block
+
+  azs              = slice(data.aws_availability_zones.available.names, 0, 2)
+  public_subnets   = [var.public_subnet_1_cidr, var.public_subnet_2_cidr]
+  private_subnets  = [var.private_subnet_1_cidr, var.private_subnet_2_cidr]
+  database_subnets = [var.db_subnet_1_cidr, var.db_subnet_2_cidr]
+
+  enable_nat_gateway   = true
+  enable_vpn_gateway   = false
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  create_database_subnet_group = true
+
+  tags = local.common_tags
+
+  public_subnet_tags = {
+    Type = "Public"
+  }
+
+  private_subnet_tags = {
+    Type = "Private"
+  }
+
+  database_subnet_tags = {
+    Type = "Database"
+  }
 }
 
-# =============================================================================
-# SQS MODULE
-# =============================================================================
 module "sqs" {
   source = "./modules/sqs"
-  
+
   project_name = local.project_name
 }
 
-# =============================================================================
-# S3 MODULE
-# =============================================================================
 module "s3" {
   source = "./modules/s3"
-  
+
   project_name = local.project_name
   environment  = local.environment
 }
 
-# =============================================================================
-# LAMBDA MODULE
-# =============================================================================
 module "lambda" {
   source = "./modules/lambda"
-  
-  project_name              = local.project_name
-  environment              = local.environment
-  region                   = local.region
-  lambda_role_arn          = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/LabRole"
-  raw_images_bucket_name   = module.s3.raw_images_bucket_name
-  api_gateway_execution_arn = ""  # Optional - can be set later if needed
-  
+
+  project_name                 = local.project_name
+  environment                  = local.environment
+  region                       = local.region
+  lambda_role_arn              = data.aws_iam_role.lab_role.arn
+  raw_images_bucket_name       = module.s3.raw_images_bucket_name
+  processed_images_bucket_name = module.s3.processed_images_bucket_name
+  api_gateway_execution_arn    = "" # Optional - can be set later if needed
+
   # VPC configuration
-  vpc_id           = module.networking.vpc_id
-  private_subnets  = module.networking.private_subnet_ids
-  
+  vpc_id          = module.vpc.vpc_id
+  private_subnets = module.vpc.private_subnets
+
   # Database configuration
   db_host     = split(":", module.rds.db_instance_endpoint)[0]
-  db_name     = module.rds.db_name
+  db_name     = module.rds.db_instance_name
   db_user     = var.db_username
   db_password = var.db_password
-  db_port     = tostring(module.rds.db_port)
-  
-  # Cognito configuration for callback Lambda
-  # Dejar vacío para evitar ciclo de dependencias (Lambda -> Cognito -> API Gateway -> Lambda)
-  # Actualizar manualmente después con: aws lambda update-function-configuration
+  db_port     = tostring(module.rds.db_instance_port)
+
   cognito_domain    = ""
   cognito_client_id = ""
-  # Frontend S3 static website URL (S3 website endpoints are HTTP-only)
   frontend_url      = "http://${module.s3.frontend_bucket_name}.s3-website-${local.region}.amazonaws.com"
-  
-  depends_on = [module.s3, module.networking, module.rds]
+
+  depends_on = [module.s3, module.vpc, module.rds]
 }
 
-# =============================================================================
-# API GATEWAY MODULE
-# =============================================================================
 module "api_gateway" {
   source = "./modules/api-gateway"
-  
+
   project_name         = local.project_name
-  region              = local.region
-  stage_name          = local.environment
-  sqs_queue_name      = module.sqs.queue_name
-  sqs_queue_url       = module.sqs.queue_url
+  region               = local.region
+  stage_name           = local.environment
+  sqs_queue_name       = module.sqs.queue_name
+  sqs_queue_url        = module.sqs.queue_url
   api_gateway_role_arn = module.sqs.api_gateway_role_arn
-  s3_bucket_name      = module.s3.raw_images_bucket_name
-  lambda_invoke_arn   = module.lambda.lambda_invoke_arn
-  
+  s3_bucket_name       = module.s3.raw_images_bucket_name
+  lambda_invoke_arn    = module.lambda.lambda_invoke_arn
+
   # API Lambda function invoke ARNs
   lambda_users_get_invoke_arn       = module.lambda.lambda_users_get_invoke_arn
   lambda_users_post_invoke_arn      = module.lambda.lambda_users_post_invoke_arn
@@ -111,7 +138,7 @@ module "api_gateway" {
   lambda_sensor_data_get_invoke_arn = module.lambda.lambda_sensor_data_get_invoke_arn
   lambda_reports_get_invoke_arn     = module.lambda.lambda_reports_get_invoke_arn
   lambda_reports_post_invoke_arn    = module.lambda.lambda_reports_post_invoke_arn
-  
+
   # API Lambda function ARNs for permissions
   lambda_users_get_function_arn       = module.lambda.lambda_users_get_function_arn
   lambda_users_post_function_arn      = module.lambda.lambda_users_post_function_arn
@@ -120,69 +147,114 @@ module "api_gateway" {
   lambda_sensor_data_get_function_arn = module.lambda.lambda_sensor_data_get_function_arn
   lambda_reports_get_function_arn     = module.lambda.lambda_reports_get_function_arn
   lambda_reports_post_function_arn    = module.lambda.lambda_reports_post_function_arn
-  
+
   # Cognito Callback Lambda
   lambda_cognito_callback_invoke_arn   = module.lambda.lambda_cognito_callback_invoke_arn
   lambda_cognito_callback_function_arn = module.lambda.lambda_cognito_callback_function_arn
-  
+
   depends_on = [module.sqs, module.lambda]
 }
 
-# =============================================================================
-# FARGATE MODULE - AWS Real
-# =============================================================================
 module "fargate" {
   source = "./modules/fargate"
-  
-  project_name        = local.project_name
+
+  project_name       = local.project_name
   aws_region         = local.region
-  vpc_id             = module.networking.vpc_id
+  vpc_id             = module.vpc.vpc_id
   vpc_cidr           = var.vpc_cidr_block
-  private_subnet_ids = module.networking.private_subnet_ids
-  public_subnet_ids  = module.networking.public_subnet_ids
+  private_subnet_ids = module.vpc.private_subnets
   db_subnet_cidrs    = [var.db_subnet_1_cidr, var.db_subnet_2_cidr]
-  
+
   # SQS integration
-  sqs_queue_url      = module.sqs.queue_url
-  sqs_queue_arn      = module.sqs.queue_arn
-  
+  sqs_queue_url = module.sqs.queue_url
+  sqs_queue_arn = module.sqs.queue_arn
+
   # S3 integration
-  raw_images_bucket_name      = module.s3.raw_images_bucket_name
-  raw_images_bucket_arn       = module.s3.raw_images_bucket_arn
+  raw_images_bucket_name       = module.s3.raw_images_bucket_name
+  raw_images_bucket_arn        = module.s3.raw_images_bucket_arn
   processed_images_bucket_name = module.s3.processed_images_bucket_name
   processed_images_bucket_arn  = module.s3.processed_images_bucket_arn
-  
+
   # RDS integration (extract hostname without port)
-  rds_endpoint    = split(":", module.rds.db_instance_endpoint)[0]
-  rds_db_name     = module.rds.db_name
-  rds_username    = module.rds.db_username
-  rds_password    = var.db_password
-  
+  rds_endpoint = split(":", module.rds.db_instance_endpoint)[0]
+  rds_db_name  = module.rds.db_instance_name
+  rds_username = module.rds.db_instance_username
+  rds_password = var.db_password
+
   depends_on = [module.sqs, module.s3, module.rds]
 }
 
-# =============================================================================
-# RDS MODULE
-# =============================================================================
 module "rds" {
-  source = "./modules/rds"
-  
-  project_name       = local.project_name
-  vpc_id            = module.networking.vpc_id
-  vpc_cidr          = var.vpc_cidr_block
-  private_subnet_ids = module.networking.database_subnet_ids
-  app_subnet_cidrs  = [var.private_subnet_1_cidr, var.private_subnet_2_cidr]
-  db_username       = var.db_username
-  db_password       = var.db_password
-  
-  # AWS settings
-  db_instance_class = "db.t3.small"
-  create_read_replica = var.create_read_replica
+  source  = "terraform-aws-modules/rds/aws"
+  version = "6.1.1"
+
+  identifier = "${local.project_name}-postgres"
+
+  engine               = "postgres"
+  engine_version       = "15"
+  family               = "postgres15"
+  major_engine_version = "15"
+  instance_class       = var.db_instance_class
+
+  allocated_storage     = 20
+  max_allocated_storage = 100
+  storage_encrypted     = true
+
+  db_name  = "agrosynchro"
+  username = var.db_username
+  password = var.db_password
+  port     = 5432
+
+  manage_master_user_password = false
+
+  vpc_security_group_ids = [aws_security_group.rds.id]
+
+  # Database subnet group
+  db_subnet_group_name   = module.vpc.database_subnet_group
+  create_db_subnet_group = false
+
+  backup_retention_period = 1
+  backup_window           = "03:00-04:00"
+  maintenance_window      = "sun:04:00-sun:05:00"
+
+  create_monitoring_role = false
+  monitoring_interval    = 0
+
+  skip_final_snapshot = true
+  deletion_protection = false
+
+  tags = local.common_tags
 }
 
-# =============================================================================
-# COGNITO MODULE - User Authentication
-# =============================================================================
+# Security group for RDS (needed as external module doesn't create it)
+resource "aws_security_group" "rds" {
+  name_prefix = "${local.project_name}-rds-"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [var.private_subnet_1_cidr, var.private_subnet_2_cidr]
+    description = "PostgreSQL access from private subnets"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${local.project_name}-rds-sg"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 
 # Random string para hacer el dominio de Cognito único
 resource "random_string" "cognito_domain" {
@@ -193,33 +265,23 @@ resource "random_string" "cognito_domain" {
 
 module "cognito" {
   source = "./modules/cognito"
-  
+
   project_name  = local.project_name
   domain_prefix = random_string.cognito_domain.result
-  
-  # URLs del callback permitidas por Cognito (HTTPS excepto localhost)
+
   callback_urls = [
     "http://localhost:3000/callback",
     "${module.api_gateway.api_gateway_invoke_url}/callback"
   ]
-  
-  # Logout URLs - Solo localhost (S3 website es HTTP y Cognito requiere HTTPS)
-  # Para producción, usar CloudFront con HTTPS o un custom domain
-  # Nota: Para deployment en AWS, el logout se maneja solo localmente (sin redirección a Cognito)
+
   logout_urls = [
     "http://localhost:3000/"
   ]
-  
-  # OAuth flows para aplicaciones web
+
   oauth_flows  = ["code"]
   oauth_scopes = ["email", "openid", "profile"]
 }
 
-# =============================================================================
-# FRONTEND CONFIGURATION - DYNAMIC ENV.JS WITH API GATEWAY URL
-# =============================================================================
-
-# Generate dynamic env.js file with the correct API Gateway URL
 resource "aws_s3_object" "frontend_env_js" {
   bucket       = module.s3.frontend_bucket_name
   key          = "env.js"
@@ -233,21 +295,31 @@ window.ENV = {
 EOF
   content_type = "application/javascript"
   etag         = md5("${module.api_gateway.api_gateway_invoke_url}-${module.cognito.domain}-${module.cognito.user_pool_client_id}")
-  
+
   depends_on = [module.api_gateway, module.s3, module.cognito]
 }
 
-# =============================================================================
-# SECURITY GROUP RULES FOR LAMBDA TO RDS COMMUNICATION
-# =============================================================================
+# Ejemplo de for_each para tracking de componentes
+resource "null_resource" "component_tracker" {
+  for_each = local.infrastructure_components
 
-# Allow Lambda security group to access RDS on port 5432
+  triggers = {
+    component_name = each.value.name
+    component_type = each.value.type
+    timestamp      = timestamp()
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 resource "aws_security_group_rule" "lambda_to_rds" {
   type                     = "ingress"
   from_port                = 5432
   to_port                  = 5432
   protocol                 = "tcp"
   source_security_group_id = module.lambda.lambda_security_group_id
-  security_group_id        = module.rds.security_group_id
+  security_group_id        = aws_security_group.rds.id
   description              = "Allow Lambda to access RDS PostgreSQL"
 }

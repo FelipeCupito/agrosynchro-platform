@@ -1,0 +1,15 @@
+aws_region            = "us-east-1"
+vpc_cidr_block        = "10.0.0.0/16"
+public_subnet_1_cidr  = "10.0.1.0/24"
+public_subnet_2_cidr  = "10.0.2.0/24"
+private_subnet_1_cidr = "10.0.3.0/24"
+private_subnet_2_cidr = "10.0.4.0/24"
+db_subnet_1_cidr      = "10.0.5.0/24"
+db_subnet_2_cidr      = "10.0.6.0/24"
+
+your_ip             = "190.224.129.60/32"
+key_pair_name       = "vockey"
+db_username         = "agro"
+db_password         = "agro12345"
+db_instance_class   = "db.t3.micro"
+create_read_replica = true

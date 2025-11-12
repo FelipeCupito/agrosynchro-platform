@@ -4,73 +4,111 @@
 
 ## 🏗️ Arquitectura General
 
-### Diseño Serverless (AWS)
-```
-📱 Ingesta Externa                    🎯 Dashboard Interno
-     ↓                                        ↓
-[IoT/Drones] → [API Gateway] → [SQS] → [Fargate] ← [ALB] ← [Frontend S3]
-                     ↓             ↓        ↓
-                [Lambda] → [S3] → [IA] → [RDS PostgreSQL]
-```
-
 ### Separación de Responsabilidades
 - **API Gateway**: Recepción de datos externos (sensores IoT, drones)  
 - **Application Load Balancer**: Backend del dashboard web y APIs internas
 - **Fargate**: Motor de procesamiento containerizado con auto-scaling
 - **RDS**: Base de datos PostgreSQL Multi-AZ para persistencia
 
-## 🚀 Despliegue Automatizado (Un Solo Comando)
+## 📦 Módulos de Infraestructura
 
+### Módulos Personalizados (6)
+- **`lambda/`** - Funciones Lambda para API y procesamiento inicial
+- **`s3/`** - Buckets optimizados: frontend público, imágenes raw/procesadas privadas
+- **`sqs/`** - Colas de mensajes con dead letter queue para tolerancia a fallos
+- **`api-gateway/`** - REST API con integración Lambda/SQS y autenticación Cognito
+- **`cognito/`** - User pools y autenticación OAuth2/OpenID Connect
+- **`fargate/`** - Workers containerizados para procesamiento de imágenes
+
+### Módulos Externos Empresariales (2)
+- **`terraform-aws-modules/vpc/aws`** - VPC enterprise-grade con Multi-AZ, NAT gateways
+- **`terraform-aws-modules/rds/aws`** - PostgreSQL con backups automáticos, encriptación
+
+## 🎛️ Características Terraform Avanzadas
+
+### Meta-argumentos Implementados
+- **`depends_on`**: Control explícito de dependencias entre módulos (5 recursos)
+- **`for_each`**: Tracking dinámico de componentes de infraestructura
+- **`count`**: Recursos condicionales para réplicas y permisos
+- **`lifecycle`**: `create_before_destroy` para recursos críticos
+
+### Funciones Terraform (11 implementadas)
+`split()`, `tostring()`, `md5()`, `jsonencode()`, `length()`, `lookup()`, `filemd5()`, `sha1()`, `slice()`, `formatdate()`, `timestamp()`
+
+## 🚀 Despliegue Automatizado
+
+### Prerrequisitos
+- **Terraform >= 1.0**
+- **AWS CLI configurado** (preferiblemente con LabRole para AWS Academy)  
+- **Docker Desktop** (para processing engine)
+- **Node.js + npm** (para frontend)
+- **jq, bc** (utilities Unix estándar)
+
+### Deployment Automático (Recomendado) ⭐
+
+**Pasos de ejecución:**
+
+1. **Clonar y preparar el proyecto**
+   ```bash
+   git clone <repository-url>
+   cd agrosynchro-platform
+   ```
+
+2. **Configurar AWS CLI**
+   ```bash
+	aws configure
+	# Ir al AWS Academy Lab y obtener credentials
+	# AWS Access Key ID: "ASIA..."
+	# AWS Secret Access Key: "..."
+	# AWS Session Token: "..."
+	# Default region name: "us-east-1"
+	# Default output format:  
+   ```
+	**Verificar identidad:**
+   ```bash
+   aws sts get-caller-identity
+   ```
+
+3. **Ejecutar deployment**
+   ```bash
+   # Hacer ejecutables los scripts
+   chmod +x terraform/scripts/*.sh
+   
+   # Deployment completo automático
+   ./terraform/scripts/deploy.sh -y
+   
+   # Deployment interactivo (recomendado primera vez)
+   ./terraform/scripts/deploy.sh
+   
+   # Ver opciones avanzadas
+   ./terraform/scripts/deploy.sh --help
+   ```
+
+### Opciones Avanzadas
 ```bash
-# Despliegue completo automatizado
-./deploy.sh
+# Solo infraestructura (sin builds)
+./terraform/scripts/deploy.sh --skip-frontend --skip-processing -y
+
+# Con logs detallados para debugging
+./terraform/scripts/deploy.sh --verbose
 ```
 
-Este script ejecuta:
-1. ✅ Validación de prerequisitos (AWS CLI, Docker, Terraform)
-2. ✅ Inicialización y planificación de Terraform  
-3. ✅ Despliegue de infraestructura AWS
-4. ✅ Build y push de imagen Docker a ECR
-5. ✅ Actualización de servicios Fargate
-6. ✅ Migración automática de base de datos
-7. ✅ Validación de endpoints
-
-## 📋 Pasos manuales (para debugging):
-
-### Prerequisites
-- AWS CLI configurado con credenciales válidas
-- Docker instalado
-- Terraform instalado (>= 1.0)
-
-### 1. **Configurar AWS CLI:**
+### Testing del Sistema
 ```bash
-aws configure
-# Ingresar AWS Access Key ID, Secret Access Key, y región (us-east-1)
-```
-
-### 2. **Verificar credenciales AWS:**
-```bash
-aws sts get-caller-identity
-```
-
-### 3. **Ir a terraform:**
-```bash
-cd terraform
-```
-
-### 4. **Agregar Gemini API Key en el archivo report_field.py:**
-
-### 5. **Ejecutar Script de incializacion:**
-```bash
-./deploy_app.sh
-```
-En caso de que falle, volver a correrlo. 
-### 6. **Ejecutar Simulador:**
-Una vez levantada la aplicacion, iniciar sesion, y en la nav bar se vera el numero de id del usuario
-```bash
+# Una vez desplegado, probar con datos simulados
+cd terraform/scripts
 ./send_sensor_data.sh
+# Ingresar User ID que aparece en la navbar del frontend
 ```
-Esto le pedira el user id para empezar a simular la informacion de los sensores
+
+### Validación
+```bash
+# Verificar endpoints
+curl -X GET $(terraform output -raw api_gateway_invoke_url)/ping
+
+# Verificar frontend  
+curl -I $(terraform output -raw frontend_website_url)
+```
 
 ## Elección de arquitectura
 

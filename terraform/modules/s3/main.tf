@@ -56,8 +56,7 @@ resource "aws_iam_role_policy" "lambda_s3_policy" {
         ]
         Resource = [
           "${aws_s3_bucket.raw_images.arn}/*",
-          "${aws_s3_bucket.processed_images.arn}/*",
-          "${aws_s3_bucket.images.arn}/*"
+          "${aws_s3_bucket.processed_images.arn}/*"
         ]
       },
       {
@@ -67,8 +66,7 @@ resource "aws_iam_role_policy" "lambda_s3_policy" {
         ]
         Resource = [
           aws_s3_bucket.raw_images.arn,
-          aws_s3_bucket.processed_images.arn,
-          aws_s3_bucket.images.arn
+          aws_s3_bucket.processed_images.arn
         ]
       }
     ]
@@ -121,8 +119,7 @@ resource "aws_iam_role_policy" "fargate_s3_policy" {
         ]
         Resource = [
           "${aws_s3_bucket.raw_images.arn}/*",
-          "${aws_s3_bucket.processed_images.arn}/*",
-          "${aws_s3_bucket.images.arn}/*"
+          "${aws_s3_bucket.processed_images.arn}/*"
         ]
       },
       {
@@ -132,8 +129,7 @@ resource "aws_iam_role_policy" "fargate_s3_policy" {
         ]
         Resource = [
           aws_s3_bucket.raw_images.arn,
-          aws_s3_bucket.processed_images.arn,
-          aws_s3_bucket.images.arn
+          aws_s3_bucket.processed_images.arn
         ]
       }
     ]
@@ -243,21 +239,35 @@ resource "aws_s3_bucket_public_access_block" "raw_images" {
   ignore_public_acls      = true
 }
 
-# Versionado para evitar pérdida de archivos
-resource "aws_s3_bucket_versioning" "raw_images_versioning" {
-  bucket = aws_s3_bucket.raw_images.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
+# Raw images: No versioning needed - original files should be kept as-is
 
-# Encriptación del bucket
+# Encriptación para protección de datos originales
 resource "aws_s3_bucket_server_side_encryption_configuration" "raw_images_encryption" {
   bucket = aws_s3_bucket.raw_images.id
 
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
+    }
+  }
+}
+
+# Lifecycle básico para raw images (solo archivado)
+resource "aws_s3_bucket_lifecycle_configuration" "raw_images_lifecycle" {
+  bucket = aws_s3_bucket.raw_images.id
+
+  rule {
+    id     = "raw_images_lifecycle"
+    status = "Enabled"
+
+    filter {
+      prefix = ""
+    }
+
+    # Archivar imágenes raw después de 180 días (raramente accedidas)
+    transition {
+      days          = 180
+      storage_class = "GLACIER"
     }
   }
 }
@@ -285,7 +295,7 @@ resource "aws_s3_bucket_public_access_block" "processed_images" {
   ignore_public_acls      = true
 }
 
-# Versionado para evitar pérdida de archivos
+# Versionado crítico para imágenes procesadas (protección contra pérdida de análisis)
 resource "aws_s3_bucket_versioning" "processed_images_versioning" {
   bucket = aws_s3_bucket.processed_images.id
   versioning_configuration {
@@ -293,7 +303,7 @@ resource "aws_s3_bucket_versioning" "processed_images_versioning" {
   }
 }
 
-# Encriptación del bucket
+# Encriptación para datos críticos de análisis
 resource "aws_s3_bucket_server_side_encryption_configuration" "processed_images_encryption" {
   bucket = aws_s3_bucket.processed_images.id
 
@@ -304,65 +314,37 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "processed_images_
   }
 }
 
-# =============================================================================
-# IMAGES BUCKET - Drone Images (privado)
-# =============================================================================
-
-resource "aws_s3_bucket" "images" {
-  bucket = "${var.project_name}-images-${random_string.bucket_suffix.result}"
-
-  tags = {
-    Name        = "${var.project_name}-images"
-    Purpose     = "drone_images_private"
-    Environment = var.environment
-  }
-}
-
-# Bloquear cualquier acceso público
-resource "aws_s3_bucket_public_access_block" "images" {
-  bucket                  = aws_s3_bucket.images.id
-  block_public_acls       = true
-  block_public_policy     = true
-  restrict_public_buckets = true
-  ignore_public_acls      = true
-}
-
-# Versionado para evitar pérdida de archivos
-resource "aws_s3_bucket_versioning" "images_versioning" {
-  bucket = aws_s3_bucket.images.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-# Encriptación del bucket
-resource "aws_s3_bucket_server_side_encryption_configuration" "images_encryption" {
-  bucket = aws_s3_bucket.images.id
+# Lifecycle policy para gestión de costos en imágenes procesadas
+resource "aws_s3_bucket_lifecycle_configuration" "processed_images_lifecycle" {
+  bucket = aws_s3_bucket.processed_images.id
 
   rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-# Lifecycle policy opcional (por ejemplo, borrar luego de 90 días)
-resource "aws_s3_bucket_lifecycle_configuration" "images_lifecycle" {
-  bucket = aws_s3_bucket.images.id
-
-  rule {
-    id     = "cleanup_old_images"
+    id     = "processed_images_lifecycle"
     status = "Enabled"
 
     filter {
       prefix = ""
     }
 
-    expiration {
-      days = 90
+    # Transición a IA después de 30 días (acceso menos frecuente)
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+
+    # Transición a Glacier después de 90 días (archivado)
+    transition {
+      days          = 90
+      storage_class = "GLACIER"
+    }
+
+    # Eliminar versiones no actuales después de 365 días
+    noncurrent_version_expiration {
+      noncurrent_days = 365
     }
   }
 }
+
 
 # =============================================================================
 # OUTPUTS
@@ -378,7 +360,3 @@ output "frontend_bucket_website_endpoint" {
   description = "URL de hosting web estático del frontend"
 }
 
-output "images_bucket_name" {
-  value       = aws_s3_bucket.images.bucket
-  description = "Nombre del bucket donde se guardan las imágenes de drones (privado)"
-}

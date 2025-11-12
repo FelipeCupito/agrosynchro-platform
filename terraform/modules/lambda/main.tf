@@ -11,7 +11,7 @@ data "archive_file" "lambda_upload_zip" {
 # Dead-letter queue
 resource "aws_sqs_queue" "lambda_dlq" {
   name                      = "${var.project_name}-lambda-dlq"
-  message_retention_seconds = 1209600  # 14 days
+  message_retention_seconds = 1209600 # 14 days
 
   tags = { Name = "${var.project_name}-lambda-dlq" }
 }
@@ -20,18 +20,18 @@ resource "aws_sqs_queue" "lambda_dlq" {
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   name              = "/aws/lambda/${var.project_name}-drone-image-upload"
   retention_in_days = 14
-  tags = { Name = "${var.project_name}-lambda-logs" }
+  tags              = { Name = "${var.project_name}-lambda-logs" }
 }
 
 # Lambda: drone_image_upload
 resource "aws_lambda_function" "drone_image_upload" {
-  filename         = data.archive_file.lambda_upload_zip.output_path
-  function_name    = "${var.project_name}-drone-image-upload"
-  role             = var.lambda_role_arn
-  handler          = "lambda_upload.handler"
-  runtime          = var.lambda_runtime
-  timeout          = 60
-  memory_size      = 512
+  filename      = data.archive_file.lambda_upload_zip.output_path
+  function_name = "${var.project_name}-drone-image-upload"
+  role          = var.lambda_role_arn
+  handler       = "lambda_upload.handler"
+  runtime       = var.lambda_runtime
+  timeout       = 60
+  memory_size   = 512
 
   dead_letter_config { target_arn = aws_sqs_queue.lambda_dlq.arn }
 
@@ -99,28 +99,28 @@ resource "aws_security_group" "lambda_sg" {
 # --- Helper locals para ENV comunes ---
 locals {
   common_env = {
-    DB_HOST       = var.db_host
-    DB_NAME       = var.db_name
-    DB_USER       = var.db_user
-    DB_PASSWORD   = var.db_password
-    DB_PORT       = var.db_port
-    IMAGES_BUCKET = var.images_bucket_name
-    REGION        = var.region
+    DB_HOST                 = var.db_host
+    DB_NAME                 = var.db_name
+    DB_USER                 = var.db_user
+    DB_PASSWORD             = var.db_password
+    DB_PORT                 = var.db_port
+    PROCESSED_IMAGES_BUCKET = var.processed_images_bucket_name
+    REGION                  = var.region
   }
 }
 
 # Lambda: api
 resource "aws_lambda_function" "api" {
-  function_name    = "${var.project_name}-api"
-  role             = var.lambda_role_arn
+  function_name = "${var.project_name}-api"
+  role          = var.lambda_role_arn
 
   filename         = data.archive_file.lambda_app_zip.output_path
   source_code_hash = data.archive_file.lambda_app_zip.output_base64sha256
 
-  handler          = "app.lambda_handler"
-  runtime          = var.lambda_runtime
-  timeout          = var.lambda_timeout
-  memory_size      = var.lambda_memory_size
+  handler     = "app.lambda_handler"
+  runtime     = var.lambda_runtime
+  timeout     = var.lambda_timeout
+  memory_size = var.lambda_memory_size
 
   vpc_config {
     subnet_ids         = var.private_subnets
@@ -252,7 +252,7 @@ resource "aws_lambda_function" "init_db" {
   source_code_hash = data.archive_file.lambda_app_zip.output_base64sha256
   handler          = "init_db.lambda_handler"
   runtime          = var.lambda_runtime
-  timeout          = 60  # Longer timeout for database operations
+  timeout          = 60 # Longer timeout for database operations
   memory_size      = var.lambda_memory_size
 
   vpc_config {
@@ -343,17 +343,17 @@ data "archive_file" "cognito_callback_zip" {
 resource "aws_cloudwatch_log_group" "cognito_callback_logs" {
   name              = "/aws/lambda/${var.project_name}-cognito-callback"
   retention_in_days = 14
-  tags = { Name = "${var.project_name}-cognito-callback-logs" }
+  tags              = { Name = "${var.project_name}-cognito-callback-logs" }
 }
 
 resource "aws_lambda_function" "cognito_callback" {
-  filename         = data.archive_file.cognito_callback_zip.output_path
-  function_name    = "${var.project_name}-cognito-callback"
-  role             = var.lambda_role_arn
-  handler          = "callback.lambda_handler"
-  runtime          = "python3.11"
-  timeout          = 10
-  memory_size      = 128
+  filename      = data.archive_file.cognito_callback_zip.output_path
+  function_name = "${var.project_name}-cognito-callback"
+  role          = var.lambda_role_arn
+  handler       = "callback.lambda_handler"
+  runtime       = "python3.11"
+  timeout       = 10
+  memory_size   = 128
 
   source_code_hash = data.archive_file.cognito_callback_zip.output_base64sha256
 

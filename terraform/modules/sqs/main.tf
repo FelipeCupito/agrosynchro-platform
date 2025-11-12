@@ -6,7 +6,7 @@ resource "aws_sqs_queue" "main" {
   message_retention_seconds  = var.message_retention_seconds
   receive_wait_time_seconds  = var.receive_wait_time_seconds
   visibility_timeout_seconds = var.visibility_timeout_seconds
-  
+
   # Enable server-side encryption
   kms_master_key_id                 = "alias/aws/sqs"
   kms_data_key_reuse_period_seconds = 300
@@ -24,9 +24,9 @@ resource "aws_sqs_queue" "main" {
 
 # Dead Letter Queue
 resource "aws_sqs_queue" "dlq" {
-  name                       = "${var.project_name}-messages-dlq"
-  message_retention_seconds  = var.dlq_message_retention_seconds
-  
+  name                      = "${var.project_name}-messages-dlq"
+  message_retention_seconds = var.dlq_message_retention_seconds
+
   # Enable server-side encryption
   kms_master_key_id                 = "alias/aws/sqs"
   kms_data_key_reuse_period_seconds = 300

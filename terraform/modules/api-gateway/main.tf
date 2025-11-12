@@ -645,7 +645,7 @@ resource "aws_api_gateway_method" "callback_get" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   resource_id   = aws_api_gateway_resource.callback.id
   http_method   = "GET"
-  authorization = "NONE"  # OAuth callback no requiere autorización previa
+  authorization = "NONE" # OAuth callback no requiere autorización previa
 }
 
 resource "aws_api_gateway_integration" "lambda_callback" {
@@ -690,7 +690,7 @@ resource "aws_api_gateway_deployment" "main" {
     aws_api_gateway_integration.reports_options_integration,
 
     aws_api_gateway_integration.lambda_callback,
-    
+
     # Integration responses
     aws_api_gateway_integration_response.sensor_data_options_integration_response
   ]

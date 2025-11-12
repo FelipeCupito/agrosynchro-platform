@@ -23,10 +23,6 @@ variable "private_subnet_ids" {
   type        = list(string)
 }
 
-variable "public_subnet_ids" {
-  description = "Public subnet IDs for ALB"
-  type        = list(string)
-}
 
 variable "db_subnet_cidrs" {
   description = "Database subnet CIDRs for security group access"
