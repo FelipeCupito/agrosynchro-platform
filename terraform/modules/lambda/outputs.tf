@@ -91,16 +91,21 @@ output "lambda_reports_post_function_arn" {
   value       = aws_lambda_function.report_field.arn
 }
 
-# --- Database initialization function (comentado: descomentar cuando RDS esté listo) ---
-# output "lambda_init_db_function_arn" {
-#   description = "Function ARN for database initialization"
-#   value       = aws_lambda_function.init_db.arn
-# }
+# --- Database initialization function ---
+output "lambda_init_db_function_arn" {
+  description = "Function ARN for database initialization"
+  value       = aws_lambda_function.init_db.arn
+}
 
-# output "lambda_init_db_function_name" {
-#   description = "Function name for database initialization"
-#   value       = aws_lambda_function.init_db.function_name
-# }
+output "lambda_init_db_function_name" {
+  description = "Function name for database initialization"
+  value       = aws_lambda_function.init_db.function_name
+}
+
+output "lambda_init_db_invoke_arn" {
+  description = "Invoke ARN for database initialization"
+  value       = aws_lambda_function.init_db.invoke_arn
+}
 
 # --- Info útil adicional ---
 output "lambda_security_group_id" {

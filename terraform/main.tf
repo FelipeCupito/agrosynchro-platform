@@ -61,6 +61,9 @@ module "vpc" {
 
   create_database_subnet_group = true
 
+  enable_s3_endpoint = true
+  s3_endpoint_type   = "Gateway"
+
   tags = local.common_tags
 
   public_subnet_tags = {
