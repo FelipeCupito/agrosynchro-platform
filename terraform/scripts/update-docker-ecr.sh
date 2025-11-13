@@ -124,7 +124,7 @@ build_and_push_image() {
     
     # Build de la imagen
     local build_tag="$ECR_REPO_NAME:latest"
-    if ! docker build -t "$build_tag" .; then
+    if ! docker build --platform linux/amd64 -t "$build_tag" .; then
         log_error "Failed to build Docker image"
         exit 1
     fi

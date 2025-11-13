@@ -53,6 +53,14 @@ resource "aws_security_group" "fargate" {
   }
 
   egress {
+    from_port   = 587
+    to_port     = 587
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "SMTP access for email alerts (Gmail)"
+  }
+
+  egress {
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"

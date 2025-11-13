@@ -38,7 +38,7 @@ echo "✅ Logged into ECR successfully."
 
 # 🏗️ Build Docker image
 echo "🐳 Building Docker image..."
-docker build -t "${IMAGE_NAME}:${IMAGE_TAG}" "$SCRIPT_DIR"
+docker build --platform linux/amd64 -t "${IMAGE_NAME}:${IMAGE_TAG}" "$SCRIPT_DIR"
 
 # 🏷️ Tag and push image
 echo "📦 Tagging and pushing image to ECR..."

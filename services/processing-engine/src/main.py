@@ -70,9 +70,9 @@ def get_aws_clients():
 # ---------------------
 def send_email_alert(user_email, user_id, measurement, value, expected_range):
     logger.info("sending mail to: " + user_email)
-    subject = f"⚠️ Alerta sensor {user_id}"
+    subject = f"⚠️ Alerta sensor!"
     body = (
-        f"El sensor {user_id} reportó un valor fuera de rango:\n\n"
+        f"Se reportó un valor fuera de rango:\n\n"
         f"- Medición: {measurement}\n"
         f"- Valor recibido: {value}\n"
         f"- Rango esperado: {expected_range}\n\n"
@@ -94,13 +94,10 @@ def send_email_alert(user_email, user_id, measurement, value, expected_range):
 
 
 # ---------------------
-# Worker threads
+# Worker thread
 # ---------------------
 worker_thread = None
 worker_running = False
-
-image_worker_thread = None
-image_worker_running = False
 
 
 import psycopg2
@@ -123,14 +120,14 @@ def get_user_parameters(user_id):
 
     cursor.execute(
         """
-        SELECT temperature, humidity, soil_moisture,
+        SELECT 
                min_temperature, max_temperature,
                min_humidity, max_humidity,
                min_soil_moisture, max_soil_moisture,
-               email
+               mail
         FROM parameters
-        JOIN users ON parameters.user_id = users.id
-        WHERE user_id = %s
+        JOIN users ON parameters.userid = users.userid
+        WHERE users.userid = %s
         """,
         (user_id,),
     )
@@ -138,270 +135,15 @@ def get_user_parameters(user_id):
     conn.close()
     if row:
         return {
-            "temperature": row[0],
-            "humidity": row[1],
-            "soil_moisture": row[2],
-            "min_temperature": row[3],
-            "max_temperature": row[4],
-            "min_humidity": row[5],
-            "max_humidity": row[6],
-            "min_soil_moisture": row[7],
-            "max_soil_moisture": row[8],
-            "email": row[9],
+            "min_temperature": row[0],
+            "max_temperature": row[1],
+            "min_humidity": row[2],
+            "max_humidity": row[3],
+            "min_soil_moisture": row[4],
+            "max_soil_moisture": row[5],
+            "email": row[6],
         }
     return None
-
-
-# ---------------------
-# Image Processing Functions
-# ---------------------
-
-def get_unprocessed_images():
-    """Lista imágenes en S3 Raw que no han sido procesadas"""
-    try:
-        sqs, s3 = get_aws_clients()
-        if not s3 or not RAW_IMAGES_BUCKET:
-            return []
-            
-        # Listar objetos en S3 raw images
-        response = s3.list_objects_v2(
-            Bucket=RAW_IMAGES_BUCKET,
-            Prefix='drone-images/'
-        )
-        
-        raw_images = []
-        for obj in response.get('Contents', []):
-            s3_key = obj['Key']
-            # Solo procesar archivos de imagen
-            if s3_key.lower().endswith(('.jpg', '.jpeg', '.png')):
-                # Verificar si ya fue procesada
-                if not is_image_already_processed(s3_key):
-                    raw_images.append({
-                        'key': s3_key,
-                        'last_modified': obj['LastModified'],
-                        'size': obj['Size']
-                    })
-        
-        return raw_images
-        
-    except Exception as e:
-        logger.error(f"Error listing unprocessed images: {e}")
-        return []
-
-def is_image_already_processed(s3_key):
-    """Verificar si una imagen ya fue procesada"""
-    try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            user=DB_USER,
-            password=DB_PASS,
-            dbname=DB_NAME
-        )
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            "SELECT id FROM image_analysis WHERE original_s3_key = %s",
-            (s3_key,)
-        )
-        result = cursor.fetchone()
-        conn.close()
-        
-        return result is not None
-        
-    except Exception as e:
-        logger.error(f"Error checking if image processed: {e}")
-        return False  # En caso de error, reintentamos
-
-def process_image(s3_key):
-    """Procesar una imagen individual con delay simulado"""
-    try:
-        sqs, s3 = get_aws_clients()
-        if not s3:
-            logger.error("S3 client not available")
-            return False
-            
-        logger.info(f"🖼️ Iniciando procesamiento de imagen: {s3_key}")
-        
-        # 1. Descargar imagen de S3 Raw
-        logger.info(f"📥 Descargando imagen desde S3...")
-        response = s3.get_object(Bucket=RAW_IMAGES_BUCKET, Key=s3_key)
-        image_bytes = response['Body'].read()
-        metadata = response.get('Metadata', {})
-        
-        drone_id = metadata.get('drone_id', 'unknown')
-        timestamp = metadata.get('timestamp', datetime.utcnow().isoformat() + 'Z')
-        
-        logger.info(f"✅ Imagen descargada: {len(image_bytes)} bytes")
-        
-        # 2. DELAY SIMULADO - Simular procesamiento pesado de IA/ML
-        processing_time = 60  # 1 minuto
-        logger.info(f"🧠 Procesando imagen con IA (simulado)... esto tomará {processing_time} segundos")
-        
-        for i in range(0, processing_time, 10):  # Mostrar progreso cada 10s
-            time.sleep(10)
-            remaining = processing_time - i - 10
-            if remaining > 0:
-                logger.info(f"⏳ Procesando... {remaining} segundos restantes")
-        
-        logger.info(f"✅ Procesamiento IA completado")
-        
-        # 3. Generar análisis simulado
-        analysis_result = generate_image_analysis(image_bytes, drone_id, timestamp, s3_key)
-        
-        # 4. Subir imagen procesada a S3 Processed
-        processed_key = s3_key.replace('drone-images/', 'processed-images/')
-        
-        # Copiar imagen original al bucket procesado
-        s3.copy_object(
-            CopySource={'Bucket': RAW_IMAGES_BUCKET, 'Key': s3_key},
-            Bucket=PROCESSED_IMAGES_BUCKET,
-            Key=processed_key,
-            MetadataDirective='REPLACE',
-            Metadata={
-                'processed_at': datetime.utcnow().isoformat() + 'Z',
-                'processing_status': 'completed',
-                'original_drone_id': drone_id
-            }
-        )
-        
-        # 5. Subir análisis JSON
-        analysis_key = processed_key.replace('.jpg', '_analysis.json').replace('.png', '_analysis.json').replace('.jpeg', '_analysis.json')
-        
-        s3.put_object(
-            Bucket=PROCESSED_IMAGES_BUCKET,
-            Key=analysis_key,
-            Body=json.dumps(analysis_result, indent=2),
-            ContentType='application/json'
-        )
-        
-        logger.info(f"📤 Resultados subidos a S3: {analysis_key}")
-        
-        # 6. Guardar metadatos en RDS
-        save_image_analysis_to_db(drone_id, s3_key, processed_key, analysis_key, analysis_result, timestamp)
-        
-        logger.info(f"🎉 Procesamiento completo de {s3_key}")
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Error procesando imagen {s3_key}: {e}")
-        return False
-
-def generate_image_analysis(image_bytes, drone_id, timestamp, s3_key):
-    """Generar análisis simulado de la imagen"""
-    import hashlib
-    import random
-    
-    # Simular análisis más realista
-    image_hash = hashlib.md5(image_bytes).hexdigest()
-    image_size = len(image_bytes)
-    
-    # Simular métricas variables pero realistas
-    vegetation_index = round(random.uniform(0.3, 0.95), 2)  # NDVI simulado
-    crop_health = "healthy" if vegetation_index > 0.6 else "stressed" if vegetation_index > 0.4 else "poor"
-    pest_probability = random.uniform(0.0, 0.3)  # Baja probabilidad de plagas
-    disease_probability = random.uniform(0.0, 0.2)  # Baja probabilidad de enfermedades
-    
-    analysis_result = {
-        "drone_id": drone_id,
-        "timestamp": timestamp,
-        "processed_at": datetime.utcnow().isoformat() + 'Z',
-        "original_s3_key": s3_key,
-        "image_metadata": {
-            "hash": image_hash,
-            "size_bytes": image_size,
-            "format": "JPEG" if s3_key.lower().endswith('.jpg') else "PNG"
-        },
-        "analysis": {
-            "vegetation_index": vegetation_index,
-            "crop_health": crop_health,
-            "pest_detected": pest_probability > 0.2,
-            "pest_confidence": round(pest_probability, 2),
-            "disease_detected": disease_probability > 0.15,
-            "disease_confidence": round(disease_probability, 2),
-            "soil_coverage": round(random.uniform(0.7, 0.95), 2),
-            "plant_count_estimate": random.randint(150, 300)
-        },
-        "recommendations": [],
-        "processing_info": {
-            "algorithm_version": "1.2.0",
-            "processing_time_seconds": 60,
-            "confidence_score": round(random.uniform(0.85, 0.98), 2)
-        }
-    }
-    
-    # Añadir recomendaciones basadas en el análisis
-    if analysis_result["analysis"]["crop_health"] == "stressed":
-        analysis_result["recommendations"].append("Revisar niveles de irrigación")
-        analysis_result["recommendations"].append("Considerar fertilización adicional")
-    
-    if analysis_result["analysis"]["pest_detected"]:
-        analysis_result["recommendations"].append("Inspección de plagas recomendada")
-        
-    if analysis_result["analysis"]["disease_detected"]:
-        analysis_result["recommendations"].append("Análisis fitosanitario recomendado")
-    
-    if not analysis_result["recommendations"]:
-        analysis_result["recommendations"].append("Cultivo en buen estado - continuar monitoreo regular")
-    
-    return analysis_result
-
-def save_image_analysis_to_db(drone_id, original_key, processed_key, analysis_key, analysis_data, timestamp):
-    """Guardar análisis en base de datos"""
-    try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            user=DB_USER,
-            password=DB_PASS,
-            dbname=DB_NAME
-        )
-        cursor = conn.cursor()
-        
-        # Crear tabla si no existe
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS image_analysis (
-                id SERIAL PRIMARY KEY,
-                drone_id VARCHAR(255),
-                original_s3_key TEXT,
-                processed_s3_key TEXT,
-                analysis_s3_key TEXT,
-                analysis_data JSONB,
-                vegetation_index DECIMAL(3,2),
-                crop_health VARCHAR(50),
-                pest_detected BOOLEAN,
-                disease_detected BOOLEAN,
-                timestamp TIMESTAMP,
-                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Extraer campos principales para queries fáciles
-        analysis = analysis_data.get('analysis', {})
-        vegetation_index = analysis.get('vegetation_index', 0.0)
-        crop_health = analysis.get('crop_health', 'unknown')
-        pest_detected = analysis.get('pest_detected', False)
-        disease_detected = analysis.get('disease_detected', False)
-        
-        cursor.execute(
-            """
-            INSERT INTO image_analysis 
-            (drone_id, original_s3_key, processed_s3_key, analysis_s3_key, analysis_data, 
-             vegetation_index, crop_health, pest_detected, disease_detected, timestamp)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (drone_id, original_key, processed_key, analysis_key, json.dumps(analysis_data),
-             vegetation_index, crop_health, pest_detected, disease_detected, timestamp)
-        )
-        
-        conn.commit()
-        conn.close()
-        logger.info(f"💾 Análisis guardado en base de datos para drone {drone_id}")
-        
-    except Exception as e:
-        logger.error(f"❌ Error guardando análisis en DB: {e}")
-        raise
 
 def insert_sensor_data(user_id, timestamp, temperature, humidity, soil_moisture):
     try:
@@ -471,8 +213,103 @@ def worker():
                             logger.warning("No user_id in message, skipping")
                             continue
 
-                        logger.info(f"💾 Saving sensor data for user {user_id}: temp={temp}, hum={hum}, soil={soil}")
+                        # Convertir valores a float para asegurar comparaciones numéricas
+                        logger.info(f"� Converting sensor values to float...")
+                        try:
+                            hum = float(hum) if hum is not None else None
+                            temp = float(temp) if temp is not None else None
+                            soil = float(soil) if soil is not None else None
+                            logger.info(f"✅ Conversion successful")
+                        except (ValueError, TypeError) as e:
+                            logger.error(f"❌ Invalid sensor values for user {user_id}: hum={hum}, temp={temp}, soil={soil}. Error: {e}")
+                            continue
 
+                        logger.info(f"📊 Sensor values (converted): user_id={user_id}, temp={temp} (type: {type(temp).__name__}), hum={hum} (type: {type(hum).__name__}), soil={soil} (type: {type(soil).__name__})")
+
+                        # Obtener parámetros del usuario
+                        logger.info(f"🔍 Fetching parameters for user {user_id}...")
+                        parameters = get_user_parameters(user_id)
+                        if parameters is None:
+                            logger.warning(f"❌ User {user_id} not found in database, skipping message")
+                            continue
+                        
+                        logger.info(f"📋 User parameters retrieved:")
+                        logger.info(f"   - Email: {parameters.get('email', 'N/A')}")
+                        logger.info(f"   - Temperature range: [{parameters.get('min_temperature', 'N/A')}, {parameters.get('max_temperature', 'N/A')}]")
+                        logger.info(f"   - Humidity range: [{parameters.get('min_humidity', 'N/A')}, {parameters.get('max_humidity', 'N/A')}]")
+                        logger.info(f"   - Soil moisture range: [{parameters.get('min_soil_moisture', 'N/A')}, {parameters.get('max_soil_moisture', 'N/A')}]")
+                        
+                        # Verificar alertas - HUMIDITY
+                        if hum is not None and parameters.get('min_humidity') is not None and parameters.get('max_humidity') is not None:
+                            logger.info(f"🔍 Checking HUMIDITY: {hum} vs range [{parameters['min_humidity']}, {parameters['max_humidity']}]")
+                            
+                            if hum > parameters['max_humidity']:
+                                logger.warning(f"⚠️  HUMIDITY TOO HIGH! {hum} > {parameters['max_humidity']}")
+                                logger.info(f"📧 Triggering email alert for HIGH humidity...")
+                                send_email_alert(
+                                    parameters['email'], user_id, "Humedad", hum,
+                                    f"{parameters['min_humidity']} - {parameters['max_humidity']}"
+                                )
+                            elif hum < parameters['min_humidity']:
+                                logger.warning(f"⚠️  HUMIDITY TOO LOW! {hum} < {parameters['min_humidity']}")
+                                logger.info(f"📧 Triggering email alert for LOW humidity...")
+                                send_email_alert(
+                                    parameters['email'], user_id, "Humedad", hum,
+                                    f"{parameters['min_humidity']} - {parameters['max_humidity']}"
+                                )
+                            else:
+                                logger.info(f"✅ Humidity within range: {hum}")
+                        else:
+                            logger.info(f"ℹ️  Skipping humidity check (value or parameters missing)")
+                        
+                        # Verificar alertas - TEMPERATURE
+                        if temp is not None and parameters.get('min_temperature') is not None and parameters.get('max_temperature') is not None:
+                            logger.info(f"🔍 Checking TEMPERATURE: {temp} vs range [{parameters['min_temperature']}, {parameters['max_temperature']}]")
+                            
+                            if temp > parameters['max_temperature']:
+                                logger.warning(f"⚠️  TEMPERATURE TOO HIGH! {temp} > {parameters['max_temperature']}")
+                                logger.info(f"📧 Triggering email alert for HIGH temperature...")
+                                send_email_alert(
+                                    parameters['email'], user_id, "Temperatura", temp,
+                                    f"{parameters['min_temperature']} - {parameters['max_temperature']}"
+                                )
+                            elif temp < parameters['min_temperature']:
+                                logger.warning(f"⚠️  TEMPERATURE TOO LOW! {temp} < {parameters['min_temperature']}")
+                                logger.info(f"📧 Triggering email alert for LOW temperature...")
+                                send_email_alert(
+                                    parameters['email'], user_id, "Temperatura", temp,
+                                    f"{parameters['min_temperature']} - {parameters['max_temperature']}"
+                                )
+                            else:
+                                logger.info(f"✅ Temperature within range: {temp}")
+                        else:
+                            logger.info(f"ℹ️  Skipping temperature check (value or parameters missing)")
+                        
+                        # Verificar alertas - SOIL MOISTURE
+                        if soil is not None and parameters.get('min_soil_moisture') is not None and parameters.get('max_soil_moisture') is not None:
+                            logger.info(f"🔍 Checking SOIL MOISTURE: {soil} vs range [{parameters['min_soil_moisture']}, {parameters['max_soil_moisture']}]")
+                            
+                            if soil > parameters['max_soil_moisture']:
+                                logger.warning(f"⚠️  SOIL MOISTURE TOO HIGH! {soil} > {parameters['max_soil_moisture']}")
+                                logger.info(f"📧 Triggering email alert for HIGH soil moisture...")
+                                send_email_alert(
+                                    parameters['email'], user_id, "Humedad del suelo", soil,
+                                    f"{parameters['min_soil_moisture']} - {parameters['max_soil_moisture']}"
+                                )
+                            elif soil < parameters['min_soil_moisture']:
+                                logger.warning(f"⚠️  SOIL MOISTURE TOO LOW! {soil} < {parameters['min_soil_moisture']}")
+                                logger.info(f"📧 Triggering email alert for LOW soil moisture...")
+                                send_email_alert(
+                                    parameters['email'], user_id, "Humedad del suelo", soil,
+                                    f"{parameters['min_soil_moisture']} - {parameters['max_soil_moisture']}"
+                                )
+                            else:
+                                logger.info(f"✅ Soil moisture within range: {soil}")
+                        else:
+                            logger.info(f"ℹ️  Skipping soil moisture check (value or parameters missing)")
+
+                        logger.info(f"💾 Saving sensor data for user {user_id}: temp={temp}, hum={hum}, soil={soil}")
+                        
                         insert_sensor_data(user_id, timestamp, temp, hum, soil)
                         logger.info(f"✅ Saved sensor data: for user {user_id}")
                         
@@ -496,203 +333,34 @@ def worker():
         logger.error(f"❌ Failed to start SQS worker: {e}")
         raise
 
-def image_worker():
-    """Worker para procesar imágenes cada 2 minutos"""
-    global image_worker_running
-    
-    try:
-        logger.info("🖼️ Image worker started - polling S3 every 2 minutes")
-        
-        while image_worker_running:
-            try:
-                # Buscar imágenes sin procesar
-                unprocessed_images = get_unprocessed_images()
-                
-                if unprocessed_images:
-                    logger.info(f"📸 Found {len(unprocessed_images)} unprocessed images")
-                    
-                    for image_info in unprocessed_images:
-                        if not image_worker_running:  # Check if we should stop
-                            break
-                            
-                        s3_key = image_info['key']
-                        logger.info(f"🔄 Processing: {s3_key}")
-                        
-                        # Procesar imagen (incluye el delay de 1 minuto)
-                        success = process_image(s3_key)
-                        
-                        if success:
-                            logger.info(f"✅ Successfully processed: {s3_key}")
-                        else:
-                            logger.error(f"❌ Failed to process: {s3_key}")
-                            
-                        # Pequeña pausa entre imágenes para no sobrecargar
-                        if image_worker_running:
-                            time.sleep(5)
-                else:
-                    logger.debug("📸 No unprocessed images found")
-                    
-                # Esperar 2 minutos antes de la próxima verificación
-                for i in range(120):  # 2 minutos = 120 segundos
-                    if not image_worker_running:
-                        break
-                    time.sleep(1)
-                    
-            except Exception as e:
-                logger.error(f"Image worker error: {e}")
-                time.sleep(30)  # Esperar 30s en caso de error
-                
-    except Exception as e:
-        logger.error(f"❌ Failed to start image worker: {e}")
-        raise
-
 
 # ---------------------
 # API endpoints
 # ---------------------
 @app.route("/api/start", methods=["POST"])
 def start_worker():
-    global worker_thread, worker_running, image_worker_thread, image_worker_running
-    
-    messages = []
-    
-    # Start SQS worker
-    if not worker_running:
-        worker_running = True
-        worker_thread = threading.Thread(target=worker, daemon=True)
-        worker_thread.start()
-        messages.append("SQS sensor worker started")
-    else:
-        messages.append("SQS sensor worker already running")
-    
-    # Start image worker  
-    if not image_worker_running:
-        image_worker_running = True
-        image_worker_thread = threading.Thread(target=image_worker, daemon=True)
-        image_worker_thread.start()
-        messages.append("Image processing worker started")
-    else:
-        messages.append("Image processing worker already running")
-    
-    return jsonify({
-        "success": True, 
-        "message": " | ".join(messages),
-        "workers": {
-            "sqs_worker_running": worker_running,
-            "image_worker_running": image_worker_running
-        }
-    })
+    global worker_thread, worker_running
+    if worker_running:
+        return jsonify({"success": False, "message": "Worker already running"}), 400
+
+    worker_running = True
+    worker_thread = threading.Thread(target=worker, daemon=True)
+    worker_thread.start()
+    return jsonify({"success": True, "message": "Worker started"})
+
 
 @app.route("/api/stop", methods=["POST"])
 def stop_worker():
-    global worker_running, image_worker_running
-    
-    messages = []
-    
-    if worker_running:
-        worker_running = False
-        messages.append("SQS sensor worker stopping")
-    
-    if image_worker_running:
-        image_worker_running = False
-        messages.append("Image processing worker stopping")
-        
-    if not messages:
-        return jsonify({"success": False, "message": "No workers running"}), 400
-    
-    return jsonify({
-        "success": True, 
-        "message": " | ".join(messages),
-        "workers": {
-            "sqs_worker_running": worker_running,
-            "image_worker_running": image_worker_running
-        }
-    })
+    global worker_running
+    if not worker_running:
+        return jsonify({"success": False, "message": "Worker not running"}), 400
+    worker_running = False
+    return jsonify({"success": True, "message": "Worker stopping"})
 
-@app.route("/api/status", methods=["GET"])
-def worker_status():
-    """Status de ambos workers"""
-    return jsonify({
-        "workers": {
-            "sqs_worker_running": worker_running,
-            "image_worker_running": image_worker_running
-        },
-        "timestamp": datetime.now().isoformat()
-    })
-
-
-@app.route("/api/images/analysis", methods=["GET"])
-def get_image_analysis():
-    """Obtener análisis de imágenes procesadas"""
-    try:
-        # Parámetros opcionales
-        drone_id = request.args.get('drone_id')
-        limit = int(request.args.get('limit', 10))
-        
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            user=DB_USER,
-            password=DB_PASS,
-            dbname=DB_NAME
-        )
-        cursor = conn.cursor()
-        
-        # Query base
-        query = """
-            SELECT id, drone_id, original_s3_key, processed_s3_key, analysis_s3_key,
-                   analysis_data, vegetation_index, crop_health, pest_detected, 
-                   disease_detected, timestamp, processed_at
-            FROM image_analysis
-        """
-        params = []
-        
-        # Filtro por drone_id si se especifica
-        if drone_id:
-            query += " WHERE drone_id = %s"
-            params.append(drone_id)
-            
-        query += " ORDER BY processed_at DESC LIMIT %s"
-        params.append(limit)
-        
-        cursor.execute(query, params)
-        results = cursor.fetchall()
-        
-        analyses = []
-        for row in results:
-            analyses.append({
-                "id": row[0],
-                "drone_id": row[1],
-                "original_s3_key": row[2],
-                "processed_s3_key": row[3],
-                "analysis_s3_key": row[4],
-                "analysis_data": row[5],  # JSONB field
-                "vegetation_index": float(row[6]) if row[6] else None,
-                "crop_health": row[7],
-                "pest_detected": row[8],
-                "disease_detected": row[9],
-                "timestamp": row[10].isoformat() if row[10] else None,
-                "processed_at": row[11].isoformat() if row[11] else None
-            })
-        
-        conn.close()
-        
-        return jsonify({
-            "success": True,
-            "count": len(analyses),
-            "analyses": analyses
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting image analysis: {e}")
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
 
 @app.route("/ping", methods=["GET"])
 def ping():
-    return jsonify({"status": "ok", "service": "processing-engine", "timestamp": datetime.now().isoformat()})
+    return jsonify({"status": "ok", "service": "iot-consumer", "timestamp": datetime.now().isoformat()})
 
 @app.route("/health", methods=["GET"])
 def health():
