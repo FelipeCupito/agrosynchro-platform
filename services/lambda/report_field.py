@@ -2,8 +2,27 @@ import json
 import os
 import pg8000
 import requests
+import base64
 from datetime import datetime, timedelta
 from cors_headers import add_cors_headers
+
+
+def decode_jwt_payload(token):
+    """Decodifica el payload del JWT sin verificar la firma"""
+    try:
+        parts = token.split('.')
+        if len(parts) != 3:
+            return None
+        payload = parts[1]
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += '=' * padding
+        decoded = base64.urlsafe_b64decode(payload)
+        return json.loads(decoded)
+    except Exception as e:
+        print(f"❌ Error decoding JWT: {e}")
+        return None
+
 
 def lambda_handler(event, context):
     # --- Obtener parámetros ---
@@ -17,6 +36,37 @@ def lambda_handler(event, context):
         return add_cors_headers({
             "statusCode": 400,
             "body": json.dumps({"error": "Missing required parameter: user_id"})
+        })
+
+    # Verificar Bearer token
+    bearer_token = None
+    if 'headers' in event and event['headers']:
+        for header_key in event['headers']:
+            if header_key.lower() == 'authorization':
+                auth_header = event['headers'][header_key]
+                if auth_header and auth_header.startswith('Bearer '):
+                    bearer_token = auth_header[7:]
+                break
+    
+    if not bearer_token:
+        return add_cors_headers({
+            "statusCode": 403,
+            "body": json.dumps({"error": "Forbidden: Missing authorization token"})
+        })
+    
+    # Decodificar JWT y extraer username (cognito sub)
+    jwt_payload = decode_jwt_payload(bearer_token)
+    if not jwt_payload:
+        return add_cors_headers({
+            "statusCode": 403,
+            "body": json.dumps({"error": "Forbidden: Invalid token"})
+        })
+    
+    token_sub = jwt_payload.get('sub') or jwt_payload.get('cognito:username')
+    if not token_sub:
+        return add_cors_headers({
+            "statusCode": 403,
+            "body": json.dumps({"error": "Forbidden: Invalid token payload"})
         })
 
     # Obtener fecha del query param (por defecto ayer)
@@ -38,18 +88,42 @@ def lambda_handler(event, context):
     db_user = os.environ.get("DB_USER", "postgres")
     db_password = os.environ.get("DB_PASSWORD")
     db_port = int(os.environ.get("DB_PORT", "5432"))
-    gemini_api_key = os.environ.get("GEMINI_API_KEY", "<api_key_placeholder>")
+    gemini_api_key = os.environ.get("GEMINI_API_KEY", "AIzaSyCEVXO1EnyGEQ-T56ThRJAOmsUAPul3GZ4")
 
     try:
-        # Rango horario del día seleccionado
-        start = datetime.combine(target_date, datetime.min.time())
-        end = datetime.combine(target_date, datetime.max.time())
-
-        # --- Query a la base ---
+        # Conectar a la base de datos y validar usuario
         conn = pg8000.connect(
             host=db_host, database=db_name, user=db_user, password=db_password, port=db_port
         )
         cur = conn.cursor()
+        
+        # Validar que el cognito_sub del usuario coincida con el token
+        cur.execute("SELECT cognito_sub FROM users WHERE userid = %s", (user_id,))
+        result = cur.fetchone()
+        
+        if not result:
+            cur.close()
+            conn.close()
+            return add_cors_headers({
+                "statusCode": 404,
+                "body": json.dumps({"error": "User not found"})
+            })
+        
+        db_cognito_sub = result[0]
+        
+        if db_cognito_sub != token_sub:
+            cur.close()
+            conn.close()
+            return add_cors_headers({
+                "statusCode": 403,
+                "body": json.dumps({"error": "Forbidden: Token does not match user"})
+            })
+        
+        # Rango horario del día seleccionado
+        start = datetime.combine(target_date, datetime.min.time())
+        end = datetime.combine(target_date, datetime.max.time())
+
+        # --- Query a la base (reutilizamos la conexión) ---
         cur.execute(
             """
             SELECT timestamp, temp, hum, soil

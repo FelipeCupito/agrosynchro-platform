@@ -692,7 +692,10 @@ resource "aws_api_gateway_deployment" "main" {
     aws_api_gateway_integration.lambda_callback,
 
     # Integration responses
-    aws_api_gateway_integration_response.sensor_data_options_integration_response
+    aws_api_gateway_integration_response.users_options_integration_response,
+    aws_api_gateway_integration_response.parameters_options_integration_response,
+    aws_api_gateway_integration_response.sensor_data_options_integration_response,
+    aws_api_gateway_integration_response.reports_options_integration_response
   ]
 
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -730,6 +733,7 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_integration.lambda_get_users.id,
       aws_api_gateway_integration.lambda_post_users.id,
       aws_api_gateway_integration.users_options_integration.id,
+      aws_api_gateway_integration_response.users_options_integration_response.id,
 
       # parameters
       aws_api_gateway_resource.parameters.id,
@@ -739,6 +743,7 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_integration.lambda_get_parameters.id,
       aws_api_gateway_integration.lambda_post_parameters.id,
       aws_api_gateway_integration.parameters_options_integration.id,
+      aws_api_gateway_integration_response.parameters_options_integration_response.id,
 
       # sensor_data
       aws_api_gateway_resource.sensor_data.id,
@@ -746,6 +751,7 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_method.sensor_data_options.id,
       aws_api_gateway_integration.lambda_get_sensor_data.id,
       aws_api_gateway_integration.sensor_data_options_integration.id,
+      aws_api_gateway_integration_response.sensor_data_options_integration_response.id,
 
       # reports
       aws_api_gateway_resource.reports.id,
@@ -754,7 +760,8 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_method.reports_options.id,
       aws_api_gateway_integration.lambda_get_reports.id,
       aws_api_gateway_integration.lambda_post_reports.id,
-      aws_api_gateway_integration.reports_options_integration.id
+      aws_api_gateway_integration.reports_options_integration.id,
+      aws_api_gateway_integration_response.reports_options_integration_response.id
     ]))
   }
 
