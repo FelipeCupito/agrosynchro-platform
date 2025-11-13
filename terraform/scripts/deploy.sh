@@ -60,15 +60,6 @@ handle_script_error() {
     local line_no=$1
     
     case $exit_code in
-        141)
-            if [[ "$VERBOSE" == "true" ]]; then
-                log_warning "Error 141 detectado (SIGPIPE - broken pipe) en línea $line_no"
-                log_info "💡 Esto suele ocurrir por comandos pipe que terminan temprano"
-                log_info "🔄 Reintentando automáticamente en 3 segundos..."
-                sleep 3
-            fi
-            return 0  # Continuar ejecución
-            ;;
         130)
             log_warning "Script interrumpido por usuario (Ctrl+C)"
             exit 130
@@ -421,6 +412,18 @@ resolve_conflicts() {
                 fi
             fi
             
+            # Importar VPC si existe
+            local vpc_id
+            vpc_id=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=agrosynchro" --region us-east-1 --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "None")
+            if [[ "$vpc_id" != "None" && -n "$vpc_id" ]]; then
+                log_info "Importando VPC existente ($vpc_id)..."
+                if terraform import module.vpc.aws_vpc.this "$vpc_id" >/dev/null 2>&1; then
+                    log_success "VPC importado exitosamente"
+                else
+                    log_warning "VPC import falló - será recreado"
+                fi
+            fi
+            
             log_success "Import completado - recursos adoptados por Terraform"
             ;;
             
@@ -442,6 +445,15 @@ resolve_conflicts() {
             if aws ecr describe-repositories --repository-names "agrosynchro-processing-engine" --region us-east-1 >/dev/null 2>&1; then
                 log_info "Eliminando ECR repository con imágenes..."
                 aws ecr delete-repository --repository-name "agrosynchro-processing-engine" --force --region us-east-1 >/dev/null 2>&1 || true
+            fi
+            
+            # Eliminar VPC (aviso manual - muy complejo automatizar)
+            local vpc_id
+            vpc_id=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=agrosynchro" --region us-east-1 --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "None")
+            if [[ "$vpc_id" != "None" && -n "$vpc_id" ]]; then
+                log_warning "VPC detectado ($vpc_id) - eliminación manual recomendada"
+                log_info "💡 Para eliminar: AWS Console → VPC → Eliminar VPC y dependencias"
+                log_info "ℹ️  O será sobrescrito por Terraform en el siguiente apply"
             fi
             
             # Limpiar state local también
@@ -1163,7 +1175,6 @@ cleanup() {
         echo "   📂 Directorio Terraform: $TF_DIR"
         echo "   📋 Logs de Terraform: terraform show"
         echo "   ☁️  Estado AWS: aws sts get-caller-identity"
-        echo "   🐳 Docker status: docker info"
         echo ""
         echo "🛠️  POSIBLES SOLUCIONES:"
         echo "   1. Verificar connectivity: ping aws.amazon.com"
@@ -1171,10 +1182,6 @@ cleanup() {
         echo "   3. Revisar logs detallados con --verbose"
         echo "   4. Ejecutar terraform plan manualmente"
         echo ""
-        echo "📞 Para soporte, incluir:"
-        echo "   - Código de salida: $exit_code"
-        echo "   - Logs con --verbose"
-        echo "   - Output de terraform validate"
     fi
     
     exit $exit_code
