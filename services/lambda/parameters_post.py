@@ -2,7 +2,25 @@
 import json
 import os
 import pg8000
+import base64
 from cors_headers import add_cors_headers
+
+
+def decode_jwt_payload(token):
+    """Decodifica el payload del JWT sin verificar la firma"""
+    try:
+        parts = token.split('.')
+        if len(parts) != 3:
+            return None
+        payload = parts[1]
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += '=' * padding
+        decoded = base64.urlsafe_b64decode(payload)
+        return json.loads(decoded)
+    except Exception as e:
+        print(f"❌ Error decoding JWT: {e}")
+        return None
 
 
 def lambda_handler(event, context):
@@ -13,6 +31,37 @@ def lambda_handler(event, context):
     db_port = int(os.environ.get("DB_PORT", "5432"))
 
     try:
+        # Verificar Bearer token
+        bearer_token = None
+        if 'headers' in event and event['headers']:
+            for header_key in event['headers']:
+                if header_key.lower() == 'authorization':
+                    auth_header = event['headers'][header_key]
+                    if auth_header and auth_header.startswith('Bearer '):
+                        bearer_token = auth_header[7:]
+                    break
+        
+        if not bearer_token:
+            return add_cors_headers({
+                "statusCode": 403,
+                "body": json.dumps({"error": "Forbidden: Missing authorization token"})
+            })
+        
+        # Decodificar JWT y extraer sub
+        jwt_payload = decode_jwt_payload(bearer_token)
+        if not jwt_payload:
+            return add_cors_headers({
+                "statusCode": 403,
+                "body": json.dumps({"error": "Forbidden: Invalid token"})
+            })
+        
+        token_sub = jwt_payload.get('sub') or jwt_payload.get('cognito:username')
+        if not token_sub:
+            return add_cors_headers({
+                "statusCode": 403,
+                "body": json.dumps({"error": "Forbidden: Invalid token payload"})
+            })
+
         body = json.loads(event.get("body") or "{}")
 
         # Permite usar userid o mail para identificar al usuario
@@ -58,11 +107,22 @@ def lambda_handler(event, context):
 
         # Verificar que el usuario exista cuando viene por userid
         if userid is not None:
-            cur.execute("SELECT 1 FROM users WHERE userid = %s", (userid,))
-            if cur.fetchone() is None:
+            cur.execute("SELECT cognito_sub FROM users WHERE userid = %s", (userid,))
+            result = cur.fetchone()
+            if result is None:
                 cur.close()
                 conn.close()
                 return add_cors_headers({"statusCode": 404, "body": json.dumps({"error": f"userid {userid} not found"})})
+            
+            # Validar que el cognito_sub coincida con el token
+            db_cognito_sub = result[0]
+            if db_cognito_sub != token_sub:
+                cur.close()
+                conn.close()
+                return add_cors_headers({
+                    "statusCode": 403,
+                    "body": json.dumps({"error": "Forbidden: Token does not match user"})
+                })
 
         # Asegurar índice único por si falta
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_parameters_userid ON parameters(userid);")
