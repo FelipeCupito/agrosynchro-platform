@@ -842,10 +842,6 @@ REQUISITOS:
   ✅ Node.js + npm (para frontend)
   ✅ jq, bc (utilities)
 
-ENTORNOS SOPORTADOS:
-  🎓 AWS Academy (recomendado)
-  ☁️  AWS Regular
-  🏠 LocalStack (experimental)
 
 CARACTERÍSTICAS ROBUSTAS:
   🔍 Validación exhaustiva de dependencias
