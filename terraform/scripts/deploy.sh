@@ -28,8 +28,6 @@ readonly PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 readonly TF_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly SERVICES_DIR="$PROJECT_ROOT/services"
 
-# Sin timeouts - Deployment robusto sin interrupciones
-
 # Variables de control
 AUTO_APPROVE=false
 SKIP_INIT=false
@@ -227,7 +225,7 @@ validate_aws_access() {
         exit 1
     fi
     
-    # Verificar credentials sin timeout (problema conocido)
+    # Verificar credentials (problema conocido)
     set +e
     aws sts get-caller-identity >/dev/null 2>&1
     local aws_check=$?
@@ -320,6 +318,139 @@ validate_terraform() {
     fi
     
     log_success "Configuración Terraform válida"
+}
+
+detect_and_resolve_conflicts() {
+    log_info "🔍 Detectando recursos existentes en AWS (AWS Academy)..."
+    
+    # Temporalmente desactivar trap para validaciones AWS
+    trap - ERR
+    
+    local conflicts_found=false
+    local ecr_exists=false
+    local vpc_exists=false
+    
+    # Verificar ECR repository específico del proyecto
+    log_debug "Verificando ECR repository..."
+    if aws ecr describe-repositories --repository-names "agrosynchro-processing-engine" --region us-east-1 >/dev/null 2>&1; then
+        ecr_exists=true
+        conflicts_found=true
+        log_warning "ECR 'agrosynchro-processing-engine' ya existe en AWS"
+    fi
+    
+    # Verificar VPC con tags del proyecto
+    log_debug "Verificando VPC del proyecto..."
+    local vpc_id
+    vpc_id=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=agrosynchro" --region us-east-1 --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "None")
+    if [[ "$vpc_id" != "None" && -n "$vpc_id" ]]; then
+        vpc_exists=true
+        conflicts_found=true
+        log_warning "VPC 'agrosynchro' ya existe: $vpc_id"
+    fi
+    
+    # Reactivar trap después de validaciones AWS
+    trap 'handle_script_error $LINENO' ERR
+    
+    if [[ "$conflicts_found" == "true" ]]; then
+        echo ""
+        log_warning "⚠️  CONFLICTOS DETECTADOS - Ambiente AWS no está limpio"
+        echo ""
+        echo "Esto puede ocurrir en AWS Academy cuando:"
+        echo "  • Deployment anterior falló parcialmente"
+        echo "  • Alguien más deployó antes en esta cuenta"
+        echo "  • Resources quedaron de sesiones anteriores"
+        echo ""
+        echo "🔧 Opciones de resolución:"
+        echo "   1. [AUTO] Importar recursos existentes (más rápido)"
+        echo "   2. [CLEAN] Eliminar recursos y deployment limpio"
+        echo "   3. [SKIP] Continuar sin resolver (puede fallar)"
+        echo "   4. [CANCEL] Cancelar deployment"
+        echo ""
+        
+        if [[ "$AUTO_APPROVE" == "true" ]]; then
+            log_info "Modo auto-approve: Seleccionando opción 1 (import)"
+            resolve_conflicts "import"
+        else
+            read -p "Seleccionar opción (1/2/3/4): " -n 1 -r
+            echo ""
+            
+            case $REPLY in
+                1) resolve_conflicts "import" ;;
+                2) resolve_conflicts "clean" ;;
+                3) log_warning "Continuando sin resolver - deployment puede fallar" ;;
+                4) log_info "Deployment cancelado por el usuario"; exit 0 ;;
+                *) log_error "Opción inválida"; exit 1 ;;
+            esac
+        fi
+    else
+        log_success "No se detectaron conflictos - ambiente AWS limpio"
+    fi
+}
+
+resolve_conflicts() {
+    local action=$1
+    
+    case $action in
+        "import")
+            log_info "📥 Importando recursos existentes al state de Terraform..."
+            
+            # Backup state actual si existe
+            if [[ -f "$TF_DIR/terraform.tfstate" ]]; then
+                cp "$TF_DIR/terraform.tfstate" "$TF_DIR/terraform.tfstate.backup-$(date +%Y%m%d-%H%M%S)"
+                log_debug "State anterior respaldado"
+            fi
+            
+            # Limpiar state para import limpio
+            rm -f "$TF_DIR/terraform.tfstate"*
+            rm -rf "$TF_DIR/.terraform/"
+            
+            # Init para preparar import
+            log_info "Inicializando Terraform para import..."
+            if ! terraform init -input=false >/dev/null 2>&1; then
+                log_error "Falló terraform init para import"
+                return 1
+            fi
+            
+            # Importar ECR si existe
+            if aws ecr describe-repositories --repository-names "agrosynchro-processing-engine" --region us-east-1 >/dev/null 2>&1; then
+                log_info "Importando ECR repository..."
+                if terraform import module.fargate.aws_ecr_repository.processing_engine agrosynchro-processing-engine >/dev/null 2>&1; then
+                    log_success "ECR importado exitosamente"
+                else
+                    log_warning "ECR import falló - será recreado"
+                fi
+            fi
+            
+            log_success "Import completado - recursos adoptados por Terraform"
+            ;;
+            
+        "clean")
+            log_warning "🗑️  ELIMINANDO recursos existentes..."
+            echo ""
+            log_error "⚠️  ESTO ELIMINARÁ INFRAESTRUCTURA EXISTENTE EN AWS"
+            echo ""
+            
+            if [[ "$AUTO_APPROVE" == "false" ]]; then
+                read -p "¿Estás SEGURO? (escribir 'DELETE' para continuar): " confirm
+                if [[ "$confirm" != "DELETE" ]]; then
+                    log_info "Eliminación cancelada"
+                    return 1
+                fi
+            fi
+            
+            # Eliminar ECR con todas las imágenes
+            if aws ecr describe-repositories --repository-names "agrosynchro-processing-engine" --region us-east-1 >/dev/null 2>&1; then
+                log_info "Eliminando ECR repository con imágenes..."
+                aws ecr delete-repository --repository-name "agrosynchro-processing-engine" --force --region us-east-1 >/dev/null 2>&1 || true
+            fi
+            
+            # Limpiar state local también
+            rm -f "$TF_DIR/terraform.tfstate"*
+            rm -rf "$TF_DIR/.terraform/"
+            
+            log_success "Recursos eliminados - deployment será completamente limpio"
+            ;;
+    esac
 }
 
 # =============================================================================
@@ -446,15 +577,17 @@ build_processing_engine() {
         return 1
     fi
     
-    # Ejecutar build script
-    if [[ -x "build-and-deploy.sh" ]]; then
+    # Ejecutar script de actualización ECR
+    local ecr_script="$SCRIPT_DIR/update-docker-ecr.sh"
+    if [[ -x "$ecr_script" ]]; then
         log_info "📦 Ejecutando build y deploy a ECR..."
-        if ! run_command ./build-and-deploy.sh; then
+        if ! run_command "$ecr_script"; then
             log_error "Falló build del processing engine"
             return 1
         fi
     else
-        log_warning "build-and-deploy.sh no encontrado o no ejecutable"
+        log_error "Script ECR no encontrado: $ecr_script"
+        log_info "Verificar que existe: $ecr_script"
         return 1
     fi
     
@@ -468,6 +601,12 @@ build_processing_engine() {
 terraform_init() {
     if [[ "$SKIP_INIT" == "true" ]]; then
         log_warning "Saltando terraform init (--skip-init)"
+        return 0
+    fi
+    
+    # Verificar si ya se hizo init en resolve_conflicts
+    if [[ -f "$TF_DIR/.terraform.lock.hcl" && -d "$TF_DIR/.terraform" ]]; then
+        log_info "✅ Terraform ya inicializado (por resolución de conflictos)"
         return 0
     fi
     
@@ -495,10 +634,21 @@ terraform_plan() {
         return 1
     fi
     
+    # Mostrar resumen del plan para revisión
+    log_info "📊 Resumen del plan:"
+    terraform show -no-color "$plan_file" | grep -E "(Plan:|No changes)" || true
+    
     # Guardar nombre del plan para apply
     echo "$plan_file" > ".current_plan"
     
     log_success "Plan generado: $plan_file"
+    
+    # Pausa para revisión en modo interactivo (mejor práctica)
+    if [[ "$AUTO_APPROVE" == "false" && "$VERBOSE" == "true" ]]; then
+        echo ""
+        log_info "💡 Ejecutar 'terraform show $plan_file' para ver plan detallado"
+        read -p "Presionar ENTER para continuar con apply..." -r
+    fi
 }
 
 handle_terraform_errors() {
@@ -842,15 +992,6 @@ REQUISITOS:
   ✅ Node.js + npm (para frontend)
   ✅ jq, bc (utilities)
 
-
-CARACTERÍSTICAS ROBUSTAS:
-  🔍 Validación exhaustiva de dependencias
-  🔄 Retry automático en operaciones de red
-  ⏱️  Timeouts configurables para prevenir colgadas
-  🛡️  Rollback automático en errores críticos
-  📊 Monitoreo de salud post-deployment
-  🎯 Verificaciones de integridad
-  
 Para más información: README.md
 EOF
 }
@@ -921,6 +1062,10 @@ main() {
     log_success "Todas las validaciones pasaron ✅"
     echo ""
     
+    # Detección y resolución de conflictos (AWS Academy)
+    detect_and_resolve_conflicts
+    echo ""
+    
     # Confirmación interactiva
     if [[ "$AUTO_APPROVE" == "false" ]]; then
         echo "⚠️  El deployment modificará recursos en AWS."
@@ -936,22 +1081,17 @@ main() {
         echo ""
     fi
     
-    # Fase 1: Build de aplicaciones
-    log_info "🔨 FASE 1: Construcción de aplicaciones"
+    # Fase 1: Build del frontend (no requiere infraestructura)
+    log_info "🎨 FASE 1: Build del frontend"
     build_frontend || {
         log_error "Falló build del frontend"
-        exit 1
-    }
-    
-    build_processing_engine || {
-        log_error "Falló build del processing engine"
         exit 1
     }
     
     log_success "Fase 1 completada ✅"
     echo ""
     
-    # Fase 2: Deployment de infraestructura
+    # Fase 2: Deployment de infraestructura (incluyendo ECR)
     log_info "🏗️  FASE 2: Deployment de infraestructura"
     
     terraform_init || {
@@ -972,18 +1112,29 @@ main() {
     log_success "Fase 2 completada ✅"
     echo ""
     
-    # Fase 3: Configuración post-deployment
-    log_info "⚙️  FASE 3: Configuración de servicios"
+    # Fase 3: Build del processing engine (requiere ECR creado por Terraform)
+    log_info "🐳 FASE 3: Build del processing engine"
     
-    configure_lambdas || {
-        log_warning "Configuración de Lambdas falló - Continuar manualmente"
+    build_processing_engine || {
+        log_error "Falló build del processing engine"
+        exit 1
     }
     
     log_success "Fase 3 completada ✅"
     echo ""
     
-    # Fase 4: Verificación
-    log_info "✅ FASE 4: Verificación del deployment"
+    # Fase 4: Configuración post-deployment
+    log_info "⚙️  FASE 4: Configuración de servicios"
+    
+    configure_lambdas || {
+        log_warning "Configuración de Lambdas falló - Continuar manualmente"
+    }
+    
+    log_success "Fase 4 completada ✅"
+    echo ""
+    
+    # Fase 5: Verificación
+    log_info "✅ FASE 5: Verificación del deployment"
     
     verify_deployment || {
         log_warning "Algunas verificaciones fallaron"

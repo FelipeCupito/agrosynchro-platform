@@ -44,7 +44,7 @@ aws-credentials
 .aws/
 
 # Terraform state and configuration files
-.terraform
+.terraform/
 *.tfstate
 *.tfstate.backup
 
