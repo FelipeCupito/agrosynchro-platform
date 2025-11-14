@@ -47,6 +47,13 @@ aws-credentials
 .terraform/
 *.tfstate
 *.tfstate.backup
+*.tfstate.lock.info
+tfplan*
+.current_plan
+
+# Lambda deployment packages (generated files)
+**/lambda.zip
+**/lambda/*.zip
 
 # claude
 .claude/
