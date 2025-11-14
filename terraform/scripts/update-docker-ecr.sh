@@ -157,7 +157,7 @@ trigger_fargate_update() {
     
     # Encontrar el servicio Fargate
     local service_name cluster_name
-    service_name="agrosynchro-processing-service"
+    service_name="agrosynchro-worker"
     cluster_name="agrosynchro-cluster"
     
     # Verificar que el servicio existe
