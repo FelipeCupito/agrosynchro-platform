@@ -68,6 +68,19 @@ def lambda_handler(event, context):
                 );
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS drone_images (
+                id SERIAL PRIMARY KEY,
+                user_id VARCHAR(255),
+                raw_s3_key VARCHAR(500),
+                processed_s3_key VARCHAR(500),
+                field_status VARCHAR(50) DEFAULT 'unknown',
+                analysis_confidence REAL DEFAULT 0.0,
+                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                analyzed_at TIMESTAMP
+            )
+        """)
+
         conn.commit()
 
         print("✅ Tablas creadas exitosamente")
