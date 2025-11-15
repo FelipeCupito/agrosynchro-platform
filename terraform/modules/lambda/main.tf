@@ -233,6 +233,32 @@ resource "aws_lambda_function" "get_images" {
   }
 }
 
+# Lambda: post_image
+resource "aws_lambda_function" "post_image" {
+  function_name    = "${var.project_name}-post-image"
+  role             = var.lambda_role_arn
+  filename         = data.archive_file.lambda_app_zip.output_path
+  source_code_hash = data.archive_file.lambda_app_zip.output_base64sha256
+  handler          = "post_image.lambda_handler"
+  runtime          = var.lambda_runtime
+  timeout          = 60  # Timeout mayor para subir imágenes
+  memory_size      = 512  # Más memoria para procesar imágenes
+
+  vpc_config {
+    subnet_ids         = var.private_subnets
+    security_group_ids = [aws_security_group.lambda_sg.id]
+  }
+
+  environment {
+    variables = merge(
+      local.common_env,
+      {
+        RAW_IMAGES_BUCKET = var.raw_images_bucket_name
+      }
+    )
+  }
+}
+
 # Lambda: report_field (más pesada)
 resource "aws_lambda_function" "report_field" {
   function_name    = "${var.project_name}-report-field"
@@ -344,6 +370,15 @@ resource "aws_lambda_permission" "apigw_get_images" {
   statement_id  = "AllowExecutionFromAPIGatewayGetImages"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.get_images.arn
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${var.api_gateway_execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "apigw_post_image" {
+  count         = var.api_gateway_execution_arn == "" ? 0 : 1
+  statement_id  = "AllowExecutionFromAPIGatewayPostImage"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.post_image.arn
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${var.api_gateway_execution_arn}/*/*"
 }

@@ -479,6 +479,13 @@ resource "aws_api_gateway_method" "get_images" {
   authorization = "NONE"
 }
 
+resource "aws_api_gateway_method" "post_images" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.images.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
 resource "aws_api_gateway_method" "images_options" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   resource_id   = aws_api_gateway_resource.images.id
@@ -493,6 +500,15 @@ resource "aws_api_gateway_integration" "lambda_get_images" {
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
   uri                     = var.lambda_get_images_invoke_arn
+}
+
+resource "aws_api_gateway_integration" "lambda_post_images" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.images.id
+  http_method             = aws_api_gateway_method.post_images.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.lambda_post_image_invoke_arn
 }
 
 resource "aws_api_gateway_integration" "images_options_integration" {
@@ -531,6 +547,19 @@ resource "aws_api_gateway_method_response" "get_images_response_200" {
   }
 }
 
+resource "aws_api_gateway_method_response" "post_images_response_201" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.images.id
+  http_method = aws_api_gateway_method.post_images.http_method
+  status_code = "201"
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers"     = true,
+    "method.response.header.Access-Control-Allow-Methods"     = true,
+    "method.response.header.Access-Control-Allow-Origin"      = true,
+    "method.response.header.Access-Control-Allow-Credentials" = true
+  }
+}
+
 resource "aws_api_gateway_integration_response" "images_options_integration_response" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   resource_id = aws_api_gateway_resource.images.id
@@ -538,7 +567,7 @@ resource "aws_api_gateway_integration_response" "images_options_integration_resp
   status_code = aws_api_gateway_method_response.images_options_200.status_code
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers"     = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
-    "method.response.header.Access-Control-Allow-Methods"     = "'GET,OPTIONS'",
+    "method.response.header.Access-Control-Allow-Methods"     = "'GET,POST,OPTIONS'",
     "method.response.header.Access-Control-Allow-Origin"      = "'*'",
     "method.response.header.Access-Control-Allow-Credentials" = "'true'"
   }
@@ -703,6 +732,14 @@ resource "aws_lambda_permission" "apigw_invoke_get_images" {
   source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
 }
 
+resource "aws_lambda_permission" "apigw_invoke_post_image" {
+  statement_id  = "AllowAPIGatewayInvokePostImage"
+  action        = "lambda:InvokeFunction"
+  function_name = var.lambda_post_image_function_arn
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
+}
+
 resource "aws_lambda_permission" "apigw_invoke_get_reports" {
   statement_id  = "AllowAPIGatewayInvokeReportsGet"
   action        = "lambda:InvokeFunction"
@@ -773,6 +810,7 @@ resource "aws_api_gateway_deployment" "main" {
     aws_api_gateway_integration.sensor_data_options_integration,
 
     aws_api_gateway_integration.lambda_get_images,
+    aws_api_gateway_integration.lambda_post_images,
     aws_api_gateway_integration.images_options_integration,
 
     aws_api_gateway_integration.lambda_get_reports,
@@ -847,8 +885,10 @@ resource "aws_api_gateway_deployment" "main" {
       # images
       aws_api_gateway_resource.images.id,
       aws_api_gateway_method.get_images.id,
+      aws_api_gateway_method.post_images.id,
       aws_api_gateway_method.images_options.id,
       aws_api_gateway_integration.lambda_get_images.id,
+      aws_api_gateway_integration.lambda_post_images.id,
       aws_api_gateway_integration.images_options_integration.id,
       aws_api_gateway_integration_response.images_options_integration_response.id,
 
