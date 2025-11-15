@@ -13,7 +13,7 @@ resource "random_string" "bucket_suffix" {
 # =============================================================================
 resource "aws_s3_bucket" "buckets" {
   for_each = var.buckets
-  
+
   bucket = "${var.project_name}-${each.key}-${random_string.bucket_suffix.result}"
 
   tags = merge({
@@ -28,9 +28,9 @@ resource "aws_s3_bucket" "buckets" {
 # =============================================================================
 resource "aws_s3_bucket_public_access_block" "buckets" {
   for_each = var.buckets
-  
+
   bucket = aws_s3_bucket.buckets[each.key].id
-  
+
   block_public_acls       = !each.value.public_read
   block_public_policy     = !each.value.public_read
   restrict_public_buckets = !each.value.public_read
@@ -42,7 +42,7 @@ resource "aws_s3_bucket_public_access_block" "buckets" {
 # =============================================================================
 resource "aws_s3_bucket_website_configuration" "website" {
   for_each = { for k, v in var.buckets : k => v if v.enable_website }
-  
+
   bucket = aws_s3_bucket.buckets[each.key].id
 
   index_document {
@@ -59,7 +59,7 @@ resource "aws_s3_bucket_website_configuration" "website" {
 # =============================================================================
 data "aws_iam_policy_document" "public_read" {
   for_each = { for k, v in var.buckets : k => v if v.public_read }
-  
+
   statement {
     sid       = "PublicReadGetObject"
     actions   = ["s3:GetObject"]
@@ -74,7 +74,7 @@ data "aws_iam_policy_document" "public_read" {
 
 resource "aws_s3_bucket_policy" "public_read" {
   for_each = { for k, v in var.buckets : k => v if v.public_read }
-  
+
   bucket = aws_s3_bucket.buckets[each.key].id
   policy = data.aws_iam_policy_document.public_read[each.key].json
 
@@ -85,10 +85,10 @@ resource "aws_s3_bucket_policy" "public_read" {
 # FRONTEND FILES UPLOAD 
 # =============================================================================
 locals {
-  website_buckets = [for k, v in var.buckets : k if v.enable_website]
+  website_buckets     = [for k, v in var.buckets : k if v.enable_website]
   frontend_bucket_key = length(local.website_buckets) > 0 ? local.website_buckets[0] : null
   should_upload_files = var.frontend_files_path != "" && local.frontend_bucket_key != null
-  frontend_files = local.should_upload_files ? setsubtract(fileset(var.frontend_files_path, "**/*"), var.frontend_files_exclude) : []
+  frontend_files      = local.should_upload_files ? setsubtract(fileset(var.frontend_files_path, "**/*"), var.frontend_files_exclude) : []
 }
 
 resource "aws_s3_object" "frontend_files" {
@@ -118,7 +118,7 @@ resource "aws_s3_object" "frontend_files" {
 # =============================================================================
 resource "aws_s3_bucket_versioning" "versioning" {
   for_each = { for k, v in var.buckets : k => v if v.enable_versioning }
-  
+
   bucket = aws_s3_bucket.buckets[each.key].id
   versioning_configuration {
     status = "Enabled"
@@ -130,7 +130,7 @@ resource "aws_s3_bucket_versioning" "versioning" {
 # =============================================================================
 resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
   for_each = { for k, v in var.buckets : k => v if v.enable_encryption }
-  
+
   bucket = aws_s3_bucket.buckets[each.key].id
 
   rule {
@@ -145,7 +145,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
 # =============================================================================
 resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
   for_each = { for k, v in var.buckets : k => v if length(v.lifecycle_rules) > 0 }
-  
+
   bucket = aws_s3_bucket.buckets[each.key].id
 
   rule {

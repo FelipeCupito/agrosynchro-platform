@@ -13,14 +13,14 @@ variable "environment" {
 variable "buckets" {
   description = "Map of bucket configurations to create"
   type = map(object({
-    purpose              = string  # Purpose tag for the bucket
-    public_read          = bool    # Whether to allow public read access
-    enable_website       = bool    # Whether to enable static website hosting
-    enable_versioning    = bool    # Whether to enable versioning
-    enable_encryption    = bool    # Whether to enable server-side encryption
-    lifecycle_rules      = list(object({
-      transition_days    = number
-      storage_class      = string
+    purpose           = string # Purpose tag for the bucket
+    public_read       = bool   # Whether to allow public read access
+    enable_website    = bool   # Whether to enable static website hosting
+    enable_versioning = bool   # Whether to enable versioning
+    enable_encryption = bool   # Whether to enable server-side encryption
+    lifecycle_rules = list(object({
+      transition_days = number
+      storage_class   = string
     }))
     noncurrent_version_expiration_days = number # Days to keep noncurrent versions (0 = no expiration)
   }))

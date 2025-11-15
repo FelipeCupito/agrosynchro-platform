@@ -311,159 +311,6 @@ validate_terraform() {
     log_success "Configuración Terraform válida"
 }
 
-detect_and_resolve_conflicts() {
-    log_info "🔍 Detectando recursos existentes en AWS (AWS Academy)..."
-    
-    # Temporalmente desactivar trap para validaciones AWS
-    trap - ERR
-    
-    local conflicts_found=false
-    local ecr_exists=false
-    local vpc_exists=false
-    
-    # Verificar ECR repository específico del proyecto
-    log_debug "Verificando ECR repository..."
-    if aws ecr describe-repositories --repository-names "agrosynchro-processing-engine" --region us-east-1 >/dev/null 2>&1; then
-        ecr_exists=true
-        conflicts_found=true
-        log_warning "ECR 'agrosynchro-processing-engine' ya existe en AWS"
-    fi
-    
-    # Verificar VPC con tags del proyecto
-    log_debug "Verificando VPC del proyecto..."
-    local vpc_id
-    vpc_id=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=agrosynchro" --region us-east-1 --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "None")
-    if [[ "$vpc_id" != "None" && -n "$vpc_id" ]]; then
-        vpc_exists=true
-        conflicts_found=true
-        log_warning "VPC 'agrosynchro' ya existe: $vpc_id"
-    fi
-    
-    # Reactivar trap después de validaciones AWS
-    trap 'handle_script_error $LINENO' ERR
-    
-    if [[ "$conflicts_found" == "true" ]]; then
-        echo ""
-        log_warning "⚠️  CONFLICTOS DETECTADOS - Ambiente AWS no está limpio"
-        echo ""
-        echo "Esto puede ocurrir en AWS Academy cuando:"
-        echo "  • Deployment anterior falló parcialmente"
-        echo "  • Alguien más deployó antes en esta cuenta"
-        echo "  • Resources quedaron de sesiones anteriores"
-        echo ""
-        echo "🔧 Opciones de resolución:"
-        echo "   1. [AUTO] Importar recursos existentes (más rápido)"
-        echo "   2. [CLEAN] Eliminar recursos y deployment limpio"
-        echo "   3. [SKIP] Continuar sin resolver (puede fallar)"
-        echo "   4. [CANCEL] Cancelar deployment"
-        echo ""
-        
-        if [[ "$AUTO_APPROVE" == "true" ]]; then
-            log_info "Modo auto-approve: Seleccionando opción 1 (import)"
-            resolve_conflicts "import"
-        else
-            read -p "Seleccionar opción (1/2/3/4): " -n 1 -r
-            echo ""
-            
-            case $REPLY in
-                1) resolve_conflicts "import" ;;
-                2) resolve_conflicts "clean" ;;
-                3) log_warning "Continuando sin resolver - deployment puede fallar" ;;
-                4) log_info "Deployment cancelado por el usuario"; exit 0 ;;
-                *) log_error "Opción inválida"; exit 1 ;;
-            esac
-        fi
-    else
-        log_success "No se detectaron conflictos - ambiente AWS limpio"
-    fi
-}
-
-resolve_conflicts() {
-    local action=$1
-    
-    case $action in
-        "import")
-            log_info "📥 Importando recursos existentes al state de Terraform..."
-            
-            # Backup state actual si existe
-            if [[ -f "$TF_DIR/terraform.tfstate" ]]; then
-                cp "$TF_DIR/terraform.tfstate" "$TF_DIR/terraform.tfstate.backup-$(date +%Y%m%d-%H%M%S)"
-                log_debug "State anterior respaldado"
-            fi
-            
-            # Limpiar state para import limpio
-            rm -f "$TF_DIR/terraform.tfstate"*
-            rm -rf "$TF_DIR/.terraform/"
-            
-            # Init para preparar import
-            log_info "Inicializando Terraform para import..."
-            if ! terraform init -input=false >/dev/null 2>&1; then
-                log_error "Falló terraform init para import"
-                return 1
-            fi
-            
-            # Importar ECR si existe
-            if aws ecr describe-repositories --repository-names "agrosynchro-processing-engine" --region us-east-1 >/dev/null 2>&1; then
-                log_info "Importando ECR repository..."
-                if terraform import module.fargate.aws_ecr_repository.processing_engine agrosynchro-processing-engine >/dev/null 2>&1; then
-                    log_success "ECR importado exitosamente"
-                else
-                    log_warning "ECR import falló - será recreado"
-                fi
-            fi
-            
-            # Importar VPC si existe
-            local vpc_id
-            vpc_id=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=agrosynchro" --region us-east-1 --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "None")
-            if [[ "$vpc_id" != "None" && -n "$vpc_id" ]]; then
-                log_info "Importando VPC existente ($vpc_id)..."
-                if terraform import module.vpc.aws_vpc.this "$vpc_id" >/dev/null 2>&1; then
-                    log_success "VPC importado exitosamente"
-                else
-                    log_warning "VPC import falló - será recreado"
-                fi
-            fi
-            
-            log_success "Import completado - recursos adoptados por Terraform"
-            ;;
-            
-        "clean")
-            log_warning "🗑️  ELIMINANDO recursos existentes..."
-            echo ""
-            log_error "⚠️  ESTO ELIMINARÁ INFRAESTRUCTURA EXISTENTE EN AWS"
-            echo ""
-            
-            if [[ "$AUTO_APPROVE" == "false" ]]; then
-                read -p "¿Estás SEGURO? (escribir 'DELETE' para continuar): " confirm
-                if [[ "$confirm" != "DELETE" ]]; then
-                    log_info "Eliminación cancelada"
-                    return 1
-                fi
-            fi
-            
-            # Eliminar ECR con todas las imágenes
-            if aws ecr describe-repositories --repository-names "agrosynchro-processing-engine" --region us-east-1 >/dev/null 2>&1; then
-                log_info "Eliminando ECR repository con imágenes..."
-                aws ecr delete-repository --repository-name "agrosynchro-processing-engine" --force --region us-east-1 >/dev/null 2>&1 || true
-            fi
-            
-            # Eliminar VPC (aviso manual - muy complejo automatizar)
-            local vpc_id
-            vpc_id=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=agrosynchro" --region us-east-1 --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "None")
-            if [[ "$vpc_id" != "None" && -n "$vpc_id" ]]; then
-                log_warning "VPC detectado ($vpc_id) - eliminación manual recomendada"
-                log_info "💡 Para eliminar: AWS Console → VPC → Eliminar VPC y dependencias"
-                log_info "ℹ️  O será sobrescrito por Terraform en el siguiente apply"
-            fi
-            
-            # Limpiar state local también
-            rm -f "$TF_DIR/terraform.tfstate"*
-            rm -rf "$TF_DIR/.terraform/"
-            
-            log_success "Recursos eliminados - deployment será completamente limpio"
-            ;;
-    esac
-}
 
 # =============================================================================
 # FUNCIONES DE UTILITY
@@ -633,6 +480,72 @@ terraform_init() {
     fi
     
     log_success "Terraform inicializado exitosamente"
+}
+
+sync_terraform_state() {
+    log_info "🔄 Sincronizando estado de Terraform con AWS..."
+    cd "$TF_DIR"
+    
+    # Ejecutar refresh para sincronizar estado con realidad de AWS
+    log_info "Ejecutando terraform refresh para detectar cambios..."
+    if ! run_command terraform plan -refresh-only -input=false >/dev/null 2>&1; then
+        log_warning "terraform refresh falló - posibles discrepancias de estado"
+        
+        # Ofrecer opciones de recuperación
+        if [[ "$AUTO_APPROVE" == "false" ]]; then
+            echo ""
+            log_warning "⚠️  ESTADO DESINCRONIZADO DETECTADO"
+            echo ""
+            echo "El estado de Terraform no coincide con AWS. Opciones:"
+            echo "   1. [REFRESH] Aplicar refresh para sincronizar (recomendado)"
+            echo "   2. [IGNORE] Continuar sin sincronizar (puede causar errores)"
+            echo "   3. [CLEAN] Eliminar estado y empezar limpio (PELIGROSO)"
+            echo ""
+            read -p "Seleccionar opción (1/2/3): " -n 1 -r
+            echo ""
+            
+            case $REPLY in
+                1) 
+                    log_info "Aplicando refresh para sincronizar estado..."
+                    if run_command terraform apply -refresh-only -auto-approve -input=false; then
+                        log_success "Estado sincronizado exitosamente"
+                    else
+                        log_error "Falló sincronización - revisar manualmente"
+                        return 1
+                    fi
+                    ;;
+                2) 
+                    log_warning "Continuando sin sincronizar - cuidado con errores"
+                    ;;
+                3)
+                    log_warning "⚠️  ELIMINANDO estado de Terraform..."
+                    read -p "¿Estás SEGURO? (escribir 'DELETE'): " confirm
+                    if [[ "$confirm" == "DELETE" ]]; then
+                        rm -f "$TF_DIR/terraform.tfstate"*
+                        log_warning "Estado eliminado - deployment será completamente nuevo"
+                    else
+                        log_info "Eliminación cancelada"
+                        return 1
+                    fi
+                    ;;
+                *)
+                    log_error "Opción inválida"
+                    return 1
+                    ;;
+            esac
+        else
+            # En modo auto-approve, aplicar refresh automáticamente
+            log_info "Modo auto-approve: Aplicando refresh automático..."
+            if run_command terraform apply -refresh-only -auto-approve -input=false; then
+                log_success "Estado sincronizado automáticamente"
+            else
+                log_error "Falló sincronización automática"
+                return 1
+            fi
+        fi
+    else
+        log_success "Estado ya sincronizado con AWS"
+    fi
 }
 
 terraform_plan() {
@@ -1074,9 +987,6 @@ main() {
     log_success "Todas las validaciones pasaron ✅"
     echo ""
     
-    # Detección y resolución de conflictos (AWS Academy)
-    detect_and_resolve_conflicts
-    echo ""
     
     # Confirmación interactiva
     if [[ "$AUTO_APPROVE" == "false" ]]; then
@@ -1108,6 +1018,11 @@ main() {
     
     terraform_init || {
         log_error "Falló terraform init"
+        exit 1
+    }
+    
+    sync_terraform_state || {
+        log_error "Falló sincronización de estado"
         exit 1
     }
     

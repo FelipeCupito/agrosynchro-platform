@@ -60,8 +60,8 @@ module "vpc" {
   enable_nat_gateway     = true
   one_nat_gateway_per_az = true
   enable_vpn_gateway     = false
-  enable_dns_hostnames = true
-  enable_dns_support   = true
+  enable_dns_hostnames   = true
+  enable_dns_support     = true
 
   create_database_subnet_group = true
 
@@ -91,13 +91,13 @@ module "vpc_endpoints" {
 
   endpoints = {
     s3 = {
-      service         = "s3"
-      service_type    = "Gateway"
+      service      = "s3"
+      service_type = "Gateway"
       route_table_ids = concat(
         module.vpc.public_route_table_ids,
         module.vpc.private_route_table_ids
       )
-      
+
       tags = {
         Name = "${local.project_name}-s3-endpoint"
       }
@@ -114,12 +114,12 @@ module "sqs" {
   source = "./modules/sqs"
 
   project_name = local.project_name
-  
+
   # Configure for sensor messages
   queue_name_suffix = "messages-queue"
   dlq_name_suffix   = "messages-dlq"
   queue_purpose     = "sensor_messages"
-  
+
   additional_tags = {
     Environment = local.environment
     Component   = "messaging"
@@ -134,52 +134,52 @@ module "s3" {
 
   project_name = local.project_name
   environment  = local.environment
-  
+
   buckets = {
     frontend = {
-      purpose               = "static_frontend"
-      public_read          = true
-      enable_website       = true
-      enable_versioning    = false
-      enable_encryption    = false
-      lifecycle_rules      = []
+      purpose                            = "static_frontend"
+      public_read                        = true
+      enable_website                     = true
+      enable_versioning                  = false
+      enable_encryption                  = false
+      lifecycle_rules                    = []
       noncurrent_version_expiration_days = 0
     }
     raw-images = {
-      purpose               = "drone_raw_images"
-      public_read          = false
-      enable_website       = false
-      enable_versioning    = false
-      enable_encryption    = true
-      lifecycle_rules      = [
+      purpose           = "drone_raw_images"
+      public_read       = false
+      enable_website    = false
+      enable_versioning = false
+      enable_encryption = true
+      lifecycle_rules = [
         {
           transition_days = 180
-          storage_class  = "GLACIER"
+          storage_class   = "GLACIER"
         }
       ]
       noncurrent_version_expiration_days = 0
     }
     processed-images = {
-      purpose               = "drone_processed_images"
-      public_read          = false
-      enable_website       = false
-      enable_versioning    = true
-      enable_encryption    = true
-      lifecycle_rules      = [
+      purpose           = "drone_processed_images"
+      public_read       = false
+      enable_website    = false
+      enable_versioning = true
+      enable_encryption = true
+      lifecycle_rules = [
         {
           transition_days = 30
-          storage_class  = "STANDARD_IA"
+          storage_class   = "STANDARD_IA"
         },
         {
           transition_days = 90
-          storage_class  = "GLACIER"
+          storage_class   = "GLACIER"
         }
       ]
       noncurrent_version_expiration_days = 365
     }
   }
-  
-  frontend_files_path = "${path.root}/../services/web-dashboard/frontend/build"
+
+  frontend_files_path    = "${path.root}/../services/web-dashboard/frontend/build"
   frontend_files_exclude = ["env.js"]
 }
 
@@ -314,7 +314,7 @@ module "rds" {
   port     = 5432
 
   manage_master_user_password = false
-  multi_az = true
+  multi_az                    = true
 
   vpc_security_group_ids = [aws_security_group.rds.id]
   db_subnet_group_name   = module.vpc.database_subnet_group
@@ -336,19 +336,19 @@ module "rds" {
 # Read Replica
 module "rds_read_replica" {
   count = var.create_read_replica ? 1 : 0
-  
+
   source  = "terraform-aws-modules/rds/aws"
   version = "6.1.1"
 
   identifier = "${local.project_name}-postgres-replica"
 
   replicate_source_db = module.rds.db_instance_identifier
-  instance_class = var.db_instance_class
-  
+  instance_class      = var.db_instance_class
+
   backup_retention_period = 0
-  skip_final_snapshot    = true
-  deletion_protection    = false
-  
+  skip_final_snapshot     = true
+  deletion_protection     = false
+
   create_monitoring_role = false
   monitoring_interval    = 0
   tags = merge(local.common_tags, {
