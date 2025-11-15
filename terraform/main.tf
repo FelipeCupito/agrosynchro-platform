@@ -262,6 +262,10 @@ module "fargate" {
   depends_on = [module.sqs, module.s3, module.rds]
 }
 
+# =============================================================================
+# RDS DATABASE CONFIGURATION
+# =============================================================================
+
 module "rds" {
   source  = "terraform-aws-modules/rds/aws"
   version = "6.1.1"
@@ -284,10 +288,9 @@ module "rds" {
   port     = 5432
 
   manage_master_user_password = false
+  multi_az = true
 
   vpc_security_group_ids = [aws_security_group.rds.id]
-
-  # Database subnet group
   db_subnet_group_name   = module.vpc.database_subnet_group
   create_db_subnet_group = false
 
@@ -304,7 +307,31 @@ module "rds" {
   tags = local.common_tags
 }
 
-# Security group for RDS (needed as external module doesn't create it)
+# Read Replica
+module "rds_read_replica" {
+  count = var.create_read_replica ? 1 : 0
+  
+  source  = "terraform-aws-modules/rds/aws"
+  version = "6.1.1"
+
+  identifier = "${local.project_name}-postgres-replica"
+
+  replicate_source_db = module.rds.db_instance_identifier
+  instance_class = var.db_instance_class
+  
+  backup_retention_period = 0
+  skip_final_snapshot    = true
+  deletion_protection    = false
+  
+  create_monitoring_role = false
+  monitoring_interval    = 0
+  tags = merge(local.common_tags, {
+    Name = "${local.project_name}-postgres-read-replica"
+    Type = "ReadReplica"
+  })
+}
+
+# RDS Security Group
 resource "aws_security_group" "rds" {
   name_prefix = "${local.project_name}-rds-"
   vpc_id      = module.vpc.vpc_id
@@ -317,12 +344,6 @@ resource "aws_security_group" "rds" {
     description = "PostgreSQL access from private subnets"
   }
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
   tags = merge(local.common_tags, {
     Name = "${local.project_name}-rds-sg"
@@ -332,6 +353,10 @@ resource "aws_security_group" "rds" {
     create_before_destroy = true
   }
 }
+
+# =============================================================================
+# END RDS DATABASE CONFIGURATION
+# =============================================================================
 
 
 # Random string para hacer el dominio de Cognito único
