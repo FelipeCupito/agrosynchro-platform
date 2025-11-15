@@ -42,6 +42,10 @@ locals {
   }
 }
 
+# =============================================================================
+# VPC AND NETWORKING CONFIGURATION
+# =============================================================================
+
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 5.0"
@@ -54,8 +58,9 @@ module "vpc" {
   private_subnets  = [var.private_subnet_1_cidr, var.private_subnet_2_cidr]
   database_subnets = [var.db_subnet_1_cidr, var.db_subnet_2_cidr]
 
-  enable_nat_gateway   = true
-  enable_vpn_gateway   = false
+  enable_nat_gateway     = true
+  one_nat_gateway_per_az = true
+  enable_vpn_gateway     = false
   enable_dns_hostnames = true
   enable_dns_support   = true
 
@@ -77,21 +82,30 @@ module "vpc" {
 }
 
 # =============================================================================
-# VPC ENDPOINT - S3 Gateway Endpoint para acceso privado
+# VPC ENDPOINTS MODULE
 # =============================================================================
-resource "aws_vpc_endpoint" "s3" {
-  vpc_id            = module.vpc.vpc_id
-  service_name      = "com.amazonaws.${local.region}.s3"
-  vpc_endpoint_type = "Gateway"
+module "vpc_endpoints" {
+  source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
+  version = "~> 5.0"
 
-  route_table_ids = concat(
-    module.vpc.public_route_table_ids,
-    module.vpc.private_route_table_ids
-  )
+  vpc_id = module.vpc.vpc_id
 
-  tags = merge(local.common_tags, {
-    Name = "${local.project_name}-s3-endpoint"
-  })
+  endpoints = {
+    s3 = {
+      service         = "s3"
+      service_type    = "Gateway"
+      route_table_ids = concat(
+        module.vpc.public_route_table_ids,
+        module.vpc.private_route_table_ids
+      )
+      
+      tags = {
+        Name = "${local.project_name}-s3-endpoint"
+      }
+    }
+  }
+
+  tags = local.common_tags
 }
 
 module "sqs" {
