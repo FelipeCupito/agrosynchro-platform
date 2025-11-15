@@ -45,6 +45,11 @@ output "lambda_sensor_data_get_invoke_arn" {
   value       = aws_lambda_function.sensor_data_get.invoke_arn
 }
 
+output "lambda_get_images_invoke_arn" {
+  description = "Invoke ARN for GET /images"
+  value       = aws_lambda_function.get_images.invoke_arn
+}
+
 output "lambda_reports_get_invoke_arn" {
   description = "Invoke ARN for GET /reports"
   value       = aws_lambda_function.reports_get.invoke_arn
@@ -79,6 +84,11 @@ output "lambda_parameters_post_function_arn" {
 output "lambda_sensor_data_get_function_arn" {
   description = "Function ARN for GET /sensor_data"
   value       = aws_lambda_function.sensor_data_get.arn
+}
+
+output "lambda_get_images_function_arn" {
+  description = "Function ARN for GET /images"
+  value       = aws_lambda_function.get_images.arn
 }
 
 output "lambda_reports_get_function_arn" {

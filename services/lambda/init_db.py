@@ -68,7 +68,7 @@ def lambda_handler(event, context):
                 );
         """)
 
-        cursor.execute("""
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS drone_images (
                 id SERIAL PRIMARY KEY,
                 user_id VARCHAR(255),
@@ -78,7 +78,7 @@ def lambda_handler(event, context):
                 analysis_confidence REAL DEFAULT 0.0,
                 processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 analyzed_at TIMESTAMP
-            )
+            );
         """)
 
         conn.commit()

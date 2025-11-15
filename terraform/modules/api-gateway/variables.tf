@@ -64,6 +64,11 @@ variable "lambda_sensor_data_get_invoke_arn" {
   type        = string
 }
 
+variable "lambda_get_images_invoke_arn" {
+  description = "Invoke ARN for GET /images"
+  type        = string
+}
+
 variable "lambda_reports_get_invoke_arn" {
   description = "Invoke ARN for GET /reports"
   type        = string
@@ -97,6 +102,11 @@ variable "lambda_parameters_post_function_arn" {
 
 variable "lambda_sensor_data_get_function_arn" {
   description = "Function ARN for GET /sensor_data"
+  type        = string
+}
+
+variable "lambda_get_images_function_arn" {
+  description = "Function ARN for GET /images"
   type        = string
 }
 
