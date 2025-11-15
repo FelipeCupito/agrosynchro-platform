@@ -57,3 +57,4 @@ tfplan*
 
 # claude
 .claude/
+terraform/terraform.tfstate.backup-pre-refactor
