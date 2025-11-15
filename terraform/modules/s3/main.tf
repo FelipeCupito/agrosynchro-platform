@@ -9,136 +9,7 @@ resource "random_string" "bucket_suffix" {
 }
 
 # =============================================================================
-# IAM ROLES FOR S3 ACCESS - COMMENTED OUT FOR AWS ACADEMY LIMITATIONS
-# =============================================================================
-
-# NOTE: In AWS Academy labs, IAM role creation is often restricted
-# You may need to use existing roles or request IAM permissions
-
-/*
-# IAM role for Lambda to access S3
-resource "aws_iam_role" "lambda_s3_role" {
-  name = "${var.project_name}-lambda-s3-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name        = "${var.project_name}-lambda-s3-role"
-    Environment = var.environment
-  }
-}
-
-# IAM policy for Lambda S3 access
-resource "aws_iam_role_policy" "lambda_s3_policy" {
-  name = "${var.project_name}-lambda-s3-policy"
-  role = aws_iam_role.lambda_s3_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject"
-        ]
-        Resource = [
-          "${aws_s3_bucket.raw_images.arn}/*",
-          "${aws_s3_bucket.processed_images.arn}/*"
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:ListBucket"
-        ]
-        Resource = [
-          aws_s3_bucket.raw_images.arn,
-          aws_s3_bucket.processed_images.arn
-        ]
-      }
-    ]
-  })
-}
-
-# Attach basic Lambda execution role
-resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  role       = aws_iam_role.lambda_s3_role.name
-}
-
-# IAM role for Fargate to access S3
-resource "aws_iam_role" "fargate_s3_role" {
-  name = "${var.project_name}-fargate-s3-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ecs-tasks.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name        = "${var.project_name}-fargate-s3-role"
-    Environment = var.environment
-  }
-}
-
-# IAM policy for Fargate S3 access
-resource "aws_iam_role_policy" "fargate_s3_policy" {
-  name = "${var.project_name}-fargate-s3-policy"
-  role = aws_iam_role.fargate_s3_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject"
-        ]
-        Resource = [
-          "${aws_s3_bucket.raw_images.arn}/*",
-          "${aws_s3_bucket.processed_images.arn}/*"
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:ListBucket"
-        ]
-        Resource = [
-          aws_s3_bucket.raw_images.arn,
-          aws_s3_bucket.processed_images.arn
-        ]
-      }
-    ]
-  })
-}
-*/
-
-# =============================================================================
-# S3 BUCKETS - Configurable with for_each
+# S3 BUCKETS - Dynamic creation with for_each pattern
 # =============================================================================
 resource "aws_s3_bucket" "buckets" {
   for_each = var.buckets
@@ -158,7 +29,8 @@ resource "aws_s3_bucket" "buckets" {
 resource "aws_s3_bucket_public_access_block" "buckets" {
   for_each = var.buckets
   
-  bucket                  = aws_s3_bucket.buckets[each.key].id
+  bucket = aws_s3_bucket.buckets[each.key].id
+  
   block_public_acls       = !each.value.public_read
   block_public_policy     = !each.value.public_read
   restrict_public_buckets = !each.value.public_read
@@ -166,7 +38,7 @@ resource "aws_s3_bucket_public_access_block" "buckets" {
 }
 
 # =============================================================================
-# WEBSITE CONFIGURATION (conditional)
+# WEBSITE CONFIGURATION
 # =============================================================================
 resource "aws_s3_bucket_website_configuration" "website" {
   for_each = { for k, v in var.buckets : k => v if v.enable_website }
@@ -183,7 +55,7 @@ resource "aws_s3_bucket_website_configuration" "website" {
 }
 
 # =============================================================================
-# PUBLIC READ POLICY (conditional)
+# PUBLIC READ POLICY 
 # =============================================================================
 data "aws_iam_policy_document" "public_read" {
   for_each = { for k, v in var.buckets : k => v if v.public_read }
@@ -210,7 +82,7 @@ resource "aws_s3_bucket_policy" "public_read" {
 }
 
 # =============================================================================
-# FRONTEND FILES UPLOAD (conditional)
+# FRONTEND FILES UPLOAD 
 # =============================================================================
 locals {
   website_buckets = [for k, v in var.buckets : k if v.enable_website]
@@ -242,7 +114,7 @@ resource "aws_s3_object" "frontend_files" {
 }
 
 # =============================================================================
-# VERSIONING CONFIGURATION (conditional)
+# VERSIONING CONFIGURATION
 # =============================================================================
 resource "aws_s3_bucket_versioning" "versioning" {
   for_each = { for k, v in var.buckets : k => v if v.enable_versioning }
@@ -254,7 +126,7 @@ resource "aws_s3_bucket_versioning" "versioning" {
 }
 
 # =============================================================================
-# ENCRYPTION CONFIGURATION (conditional)
+# ENCRYPTION CONFIGURATION 
 # =============================================================================
 resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
   for_each = { for k, v in var.buckets : k => v if v.enable_encryption }
@@ -269,7 +141,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
 }
 
 # =============================================================================
-# LIFECYCLE CONFIGURATION (conditional)
+# LIFECYCLE CONFIGURATION 
 # =============================================================================
 resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
   for_each = { for k, v in var.buckets : k => v if length(v.lifecycle_rules) > 0 }
@@ -284,7 +156,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
       prefix = ""
     }
 
-    # Dynamic transitions based on configuration
     dynamic "transition" {
       for_each = each.value.lifecycle_rules
       content {
@@ -293,7 +164,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
       }
     }
 
-    # Noncurrent version expiration (conditional)
     dynamic "noncurrent_version_expiration" {
       for_each = each.value.noncurrent_version_expiration_days > 0 ? [1] : []
       content {
@@ -303,52 +173,3 @@ resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
   }
 }
 
-# =============================================================================
-# OUTPUTS
-# =============================================================================
-
-output "bucket_names" {
-  value = { for k, v in aws_s3_bucket.buckets : k => v.bucket }
-  description = "Map of bucket names by key"
-}
-
-output "bucket_arns" {
-  value = { for k, v in aws_s3_bucket.buckets : k => v.arn }
-  description = "Map of bucket ARNs by key"
-}
-
-output "website_endpoints" {
-  value = { for k, v in aws_s3_bucket_website_configuration.website : k => v.website_endpoint }
-  description = "Map of website endpoints for buckets with website hosting enabled"
-}
-
-# Legacy outputs for backwards compatibility
-output "frontend_bucket_name" {
-  value       = try(aws_s3_bucket.buckets["frontend"].bucket, "")
-  description = "Frontend bucket name (backwards compatibility)"
-}
-
-output "raw_images_bucket_name" {
-  value       = try(aws_s3_bucket.buckets["raw-images"].bucket, "")
-  description = "Raw images bucket name (backwards compatibility)"
-}
-
-output "raw_images_bucket_arn" {
-  value       = try(aws_s3_bucket.buckets["raw-images"].arn, "")
-  description = "Raw images bucket ARN (backwards compatibility)"
-}
-
-output "processed_images_bucket_name" {
-  value       = try(aws_s3_bucket.buckets["processed-images"].bucket, "")
-  description = "Processed images bucket name (backwards compatibility)"
-}
-
-output "processed_images_bucket_arn" {
-  value       = try(aws_s3_bucket.buckets["processed-images"].arn, "")
-  description = "Processed images bucket ARN (backwards compatibility)"
-}
-
-output "frontend_bucket_website_endpoint" {
-  value       = try(aws_s3_bucket_website_configuration.website["frontend"].website_endpoint, "")
-  description = "Frontend website endpoint (backwards compatibility)"
-}

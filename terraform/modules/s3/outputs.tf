@@ -1,70 +1,47 @@
 # =============================================================================
-# S3 BUCKETS OUTPUTS
+# S3 MODULE OUTPUTS
 # =============================================================================
-
-# Raw Images Bucket Outputs
-output "raw_images_bucket_id" {
-  description = "Raw images S3 bucket ID"
-  value       = aws_s3_bucket.raw_images.id
+output "bucket_names" {
+  value       = { for k, v in aws_s3_bucket.buckets : k => v.bucket }
+  description = "Map of bucket names by key"
 }
 
-output "raw_images_bucket_arn" {
-  description = "Raw images S3 bucket ARN"
-  value       = aws_s3_bucket.raw_images.arn
+output "bucket_arns" {
+  value       = { for k, v in aws_s3_bucket.buckets : k => v.arn }
+  description = "Map of bucket ARNs by key"
+}
+
+output "website_endpoints" {
+  value       = { for k, v in aws_s3_bucket_website_configuration.website : k => v.website_endpoint }
+  description = "Map of website endpoints for buckets with website hosting enabled"
+}
+
+output "frontend_bucket_name" {
+  value       = try(aws_s3_bucket.buckets["frontend"].bucket, "")
+  description = "Frontend bucket name (backwards compatibility)"
 }
 
 output "raw_images_bucket_name" {
-  description = "Raw images S3 bucket name"
-  value       = aws_s3_bucket.raw_images.bucket
+  value       = try(aws_s3_bucket.buckets["raw-images"].bucket, "")
+  description = "Raw images bucket name (backwards compatibility)"
 }
 
-output "raw_images_bucket_domain_name" {
-  description = "Raw images S3 bucket domain name"
-  value       = aws_s3_bucket.raw_images.bucket_domain_name
-}
-
-# Processed Images Bucket Outputs
-output "processed_images_bucket_id" {
-  description = "Processed images S3 bucket ID"
-  value       = aws_s3_bucket.processed_images.id
-}
-
-output "processed_images_bucket_arn" {
-  description = "Processed images S3 bucket ARN"
-  value       = aws_s3_bucket.processed_images.arn
+output "raw_images_bucket_arn" {
+  value       = try(aws_s3_bucket.buckets["raw-images"].arn, "")
+  description = "Raw images bucket ARN (backwards compatibility)"
 }
 
 output "processed_images_bucket_name" {
-  description = "Processed images S3 bucket name"
-  value       = aws_s3_bucket.processed_images.bucket
+  value       = try(aws_s3_bucket.buckets["processed-images"].bucket, "")
+  description = "Processed images bucket name (backwards compatibility)"
 }
 
-output "processed_images_bucket_domain_name" {
-  description = "Processed images S3 bucket domain name"
-  value       = aws_s3_bucket.processed_images.bucket_domain_name
+output "processed_images_bucket_arn" {
+  value       = try(aws_s3_bucket.buckets["processed-images"].arn, "")
+  description = "Processed images bucket ARN (backwards compatibility)"
 }
 
-# IAM Roles Outputs - COMMENTED OUT FOR AWS ACADEMY LIMITATIONS
-# NOTE: These outputs are disabled because IAM role creation is restricted
-/*
-output "lambda_s3_role_arn" {
-  description = "IAM role ARN for Lambda to access S3"
-  value       = aws_iam_role.lambda_s3_role.arn
-}
-
-output "fargate_s3_role_arn" {
-  description = "IAM role ARN for Fargate to access S3"
-  value       = aws_iam_role.fargate_s3_role.arn
-}
-*/
-
-# Bucket URLs for easy access
-output "raw_images_bucket_url" {
-  description = "Raw images S3 bucket URL"
-  value       = "s3://${aws_s3_bucket.raw_images.bucket}"
-}
-
-output "processed_images_bucket_url" {
-  description = "Processed images S3 bucket URL"
-  value       = "s3://${aws_s3_bucket.processed_images.bucket}"
+output "frontend_bucket_website_endpoint" {
+  value       = try(aws_s3_bucket_website_configuration.website["frontend"].website_endpoint, "")
+  description = "Frontend website endpoint (backwards compatibility)"
 }

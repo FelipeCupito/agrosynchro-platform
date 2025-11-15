@@ -45,7 +45,6 @@ locals {
 # =============================================================================
 # VPC AND NETWORKING CONFIGURATION
 # =============================================================================
-
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 5.0"
@@ -111,7 +110,6 @@ module "vpc_endpoints" {
 # =============================================================================
 # SQS MESSAGING CONFIGURATION
 # =============================================================================
-
 module "sqs" {
   source = "./modules/sqs"
 
@@ -128,13 +126,15 @@ module "sqs" {
   }
 }
 
+# =============================================================================
+# S3 STORAGE CONFIGURATION
+# =============================================================================
 module "s3" {
   source = "./modules/s3"
 
   project_name = local.project_name
   environment  = local.environment
   
-  # Configure buckets with backwards compatibility keys
   buckets = {
     frontend = {
       purpose               = "static_frontend"
@@ -179,10 +179,13 @@ module "s3" {
     }
   }
   
-  # Frontend files configuration (backwards compatibility)
   frontend_files_path = "${path.root}/../services/web-dashboard/frontend/build"
   frontend_files_exclude = ["env.js"]
 }
+
+# =============================================================================
+# LAMBDA FUNCTIONS CONFIGURATION
+# =============================================================================
 
 module "lambda" {
   source = "./modules/lambda"
@@ -193,13 +196,11 @@ module "lambda" {
   lambda_role_arn              = data.aws_iam_role.lab_role.arn
   raw_images_bucket_name       = module.s3.raw_images_bucket_name
   processed_images_bucket_name = module.s3.processed_images_bucket_name
-  api_gateway_execution_arn    = "" # Optional - can be set later if needed
+  api_gateway_execution_arn    = ""
 
-  # VPC configuration
   vpc_id          = module.vpc.vpc_id
   private_subnets = module.vpc.private_subnets
 
-  # Database configuration
   db_host     = split(":", module.rds.db_instance_endpoint)[0]
   db_name     = module.rds.db_instance_name
   db_user     = var.db_username
@@ -212,6 +213,10 @@ module "lambda" {
 
   depends_on = [module.s3, module.vpc, module.rds]
 }
+
+# =============================================================================
+# API GATEWAY CONFIGURATION
+# =============================================================================
 
 module "api_gateway" {
   source = "./modules/api-gateway"
@@ -376,9 +381,8 @@ resource "aws_security_group" "rds" {
 }
 
 # =============================================================================
-# END RDS DATABASE CONFIGURATION
+# COGNITO AUTHENTICATION CONFIGURATION
 # =============================================================================
-
 
 # Random string para hacer el dominio de Cognito único
 resource "random_string" "cognito_domain" {
