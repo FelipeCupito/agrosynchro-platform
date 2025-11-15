@@ -116,6 +116,55 @@ module "s3" {
 
   project_name = local.project_name
   environment  = local.environment
+  
+  # Configure buckets with backwards compatibility keys
+  buckets = {
+    frontend = {
+      purpose               = "static_frontend"
+      public_read          = true
+      enable_website       = true
+      enable_versioning    = false
+      enable_encryption    = false
+      lifecycle_rules      = []
+      noncurrent_version_expiration_days = 0
+    }
+    raw-images = {
+      purpose               = "drone_raw_images"
+      public_read          = false
+      enable_website       = false
+      enable_versioning    = false
+      enable_encryption    = true
+      lifecycle_rules      = [
+        {
+          transition_days = 180
+          storage_class  = "GLACIER"
+        }
+      ]
+      noncurrent_version_expiration_days = 0
+    }
+    processed-images = {
+      purpose               = "drone_processed_images"
+      public_read          = false
+      enable_website       = false
+      enable_versioning    = true
+      enable_encryption    = true
+      lifecycle_rules      = [
+        {
+          transition_days = 30
+          storage_class  = "STANDARD_IA"
+        },
+        {
+          transition_days = 90
+          storage_class  = "GLACIER"
+        }
+      ]
+      noncurrent_version_expiration_days = 365
+    }
+  }
+  
+  # Frontend files configuration (backwards compatibility)
+  frontend_files_path = "${path.root}/../services/web-dashboard/frontend/build"
+  frontend_files_exclude = ["env.js"]
 }
 
 module "lambda" {

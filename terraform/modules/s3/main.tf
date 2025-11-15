@@ -138,46 +138,60 @@ resource "aws_iam_role_policy" "fargate_s3_policy" {
 */
 
 # =============================================================================
-# FRONTEND BUCKET - Static Website Hosting (público)
+# S3 BUCKETS - Configurable with for_each
 # =============================================================================
-resource "aws_s3_bucket" "frontend" {
-  bucket = "${var.project_name}-frontend-${random_string.bucket_suffix.result}"
+resource "aws_s3_bucket" "buckets" {
+  for_each = var.buckets
+  
+  bucket = "${var.project_name}-${each.key}-${random_string.bucket_suffix.result}"
 
-  tags = {
-    Name        = "${var.project_name}-frontend"
-    Purpose     = "static_frontend"
+  tags = merge({
+    Name        = "${var.project_name}-${each.key}"
+    Purpose     = each.value.purpose
     Environment = var.environment
-  }
+  }, var.additional_tags)
 }
 
-# Habilitar hosting web estático
-resource "aws_s3_bucket_website_configuration" "frontend" {
-  bucket = aws_s3_bucket.frontend.id
+# =============================================================================
+# PUBLIC ACCESS CONFIGURATION
+# =============================================================================
+resource "aws_s3_bucket_public_access_block" "buckets" {
+  for_each = var.buckets
+  
+  bucket                  = aws_s3_bucket.buckets[each.key].id
+  block_public_acls       = !each.value.public_read
+  block_public_policy     = !each.value.public_read
+  restrict_public_buckets = !each.value.public_read
+  ignore_public_acls      = !each.value.public_read
+}
+
+# =============================================================================
+# WEBSITE CONFIGURATION (conditional)
+# =============================================================================
+resource "aws_s3_bucket_website_configuration" "website" {
+  for_each = { for k, v in var.buckets : k => v if v.enable_website }
+  
+  bucket = aws_s3_bucket.buckets[each.key].id
 
   index_document {
-    suffix = "index.html"
+    suffix = var.website_index_document
   }
 
   error_document {
-    key = "index.html"
+    key = var.website_error_document
   }
 }
 
-# Desbloquear acceso público
-resource "aws_s3_bucket_public_access_block" "frontend" {
-  bucket                  = aws_s3_bucket.frontend.id
-  block_public_acls       = false
-  block_public_policy     = false
-  restrict_public_buckets = false
-  ignore_public_acls      = false
-}
-
-# Política pública (lectura abierta)
-data "aws_iam_policy_document" "frontend_public" {
+# =============================================================================
+# PUBLIC READ POLICY (conditional)
+# =============================================================================
+data "aws_iam_policy_document" "public_read" {
+  for_each = { for k, v in var.buckets : k => v if v.public_read }
+  
   statement {
     sid       = "PublicReadGetObject"
     actions   = ["s3:GetObject"]
-    resources = ["${aws_s3_bucket.frontend.arn}/*"]
+    resources = ["${aws_s3_bucket.buckets[each.key].arn}/*"]
 
     principals {
       type        = "*"
@@ -186,22 +200,33 @@ data "aws_iam_policy_document" "frontend_public" {
   }
 }
 
-resource "aws_s3_bucket_policy" "frontend_public" {
-  bucket = aws_s3_bucket.frontend.id
-  policy = data.aws_iam_policy_document.frontend_public.json
+resource "aws_s3_bucket_policy" "public_read" {
+  for_each = { for k, v in var.buckets : k => v if v.public_read }
+  
+  bucket = aws_s3_bucket.buckets[each.key].id
+  policy = data.aws_iam_policy_document.public_read[each.key].json
 
-  depends_on = [aws_s3_bucket_public_access_block.frontend]
+  depends_on = [aws_s3_bucket_public_access_block.buckets]
 }
 
-# Subida automática de archivos del frontend build (excluyendo env.js)
+# =============================================================================
+# FRONTEND FILES UPLOAD (conditional)
+# =============================================================================
+locals {
+  website_buckets = [for k, v in var.buckets : k if v.enable_website]
+  frontend_bucket_key = length(local.website_buckets) > 0 ? local.website_buckets[0] : null
+  should_upload_files = var.frontend_files_path != "" && local.frontend_bucket_key != null
+  frontend_files = local.should_upload_files ? setsubtract(fileset(var.frontend_files_path, "**/*"), var.frontend_files_exclude) : []
+}
+
 resource "aws_s3_object" "frontend_files" {
-  for_each = setsubtract(fileset("${path.root}/../services/web-dashboard/frontend/build", "**/*"), ["env.js"])
+  for_each = local.should_upload_files ? local.frontend_files : []
 
-  bucket = aws_s3_bucket.frontend.id
+  bucket = aws_s3_bucket.buckets[local.frontend_bucket_key].id
   key    = each.value
-  source = "${path.root}/../services/web-dashboard/frontend/build/${each.value}"
+  source = "${var.frontend_files_path}/${each.value}"
 
-  etag = filemd5("${path.root}/../services/web-dashboard/frontend/build/${each.value}")
+  etag = filemd5("${var.frontend_files_path}/${each.value}")
 
   content_type = lookup({
     "html" = "text/html",
@@ -217,95 +242,24 @@ resource "aws_s3_object" "frontend_files" {
 }
 
 # =============================================================================
-# RAW IMAGES BUCKET - Drone Raw Images (privado)
+# VERSIONING CONFIGURATION (conditional)
 # =============================================================================
-
-resource "aws_s3_bucket" "raw_images" {
-  bucket = "${var.project_name}-raw-images-${random_string.bucket_suffix.result}"
-
-  tags = {
-    Name        = "${var.project_name}-raw-images"
-    Purpose     = "drone_raw_images"
-    Environment = var.environment
-  }
-}
-
-# Bloquear cualquier acceso público
-resource "aws_s3_bucket_public_access_block" "raw_images" {
-  bucket                  = aws_s3_bucket.raw_images.id
-  block_public_acls       = true
-  block_public_policy     = true
-  restrict_public_buckets = true
-  ignore_public_acls      = true
-}
-
-# Raw images: No versioning needed - original files should be kept as-is
-
-# Encriptación para protección de datos originales
-resource "aws_s3_bucket_server_side_encryption_configuration" "raw_images_encryption" {
-  bucket = aws_s3_bucket.raw_images.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-# Lifecycle básico para raw images (solo archivado)
-resource "aws_s3_bucket_lifecycle_configuration" "raw_images_lifecycle" {
-  bucket = aws_s3_bucket.raw_images.id
-
-  rule {
-    id     = "raw_images_lifecycle"
-    status = "Enabled"
-
-    filter {
-      prefix = ""
-    }
-
-    # Archivar imágenes raw después de 180 días (raramente accedidas)
-    transition {
-      days          = 180
-      storage_class = "GLACIER"
-    }
-  }
-}
-
-# =============================================================================
-# PROCESSED IMAGES BUCKET - Processed Drone Images (privado)
-# =============================================================================
-
-resource "aws_s3_bucket" "processed_images" {
-  bucket = "${var.project_name}-processed-images-${random_string.bucket_suffix.result}"
-
-  tags = {
-    Name        = "${var.project_name}-processed-images"
-    Purpose     = "drone_processed_images"
-    Environment = var.environment
-  }
-}
-
-# Bloquear cualquier acceso público
-resource "aws_s3_bucket_public_access_block" "processed_images" {
-  bucket                  = aws_s3_bucket.processed_images.id
-  block_public_acls       = true
-  block_public_policy     = true
-  restrict_public_buckets = true
-  ignore_public_acls      = true
-}
-
-# Versionado crítico para imágenes procesadas (protección contra pérdida de análisis)
-resource "aws_s3_bucket_versioning" "processed_images_versioning" {
-  bucket = aws_s3_bucket.processed_images.id
+resource "aws_s3_bucket_versioning" "versioning" {
+  for_each = { for k, v in var.buckets : k => v if v.enable_versioning }
+  
+  bucket = aws_s3_bucket.buckets[each.key].id
   versioning_configuration {
     status = "Enabled"
   }
 }
 
-# Encriptación para datos críticos de análisis
-resource "aws_s3_bucket_server_side_encryption_configuration" "processed_images_encryption" {
-  bucket = aws_s3_bucket.processed_images.id
+# =============================================================================
+# ENCRYPTION CONFIGURATION (conditional)
+# =============================================================================
+resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
+  for_each = { for k, v in var.buckets : k => v if v.enable_encryption }
+  
+  bucket = aws_s3_bucket.buckets[each.key].id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -314,49 +268,87 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "processed_images_
   }
 }
 
-# Lifecycle policy para gestión de costos en imágenes procesadas
-resource "aws_s3_bucket_lifecycle_configuration" "processed_images_lifecycle" {
-  bucket = aws_s3_bucket.processed_images.id
+# =============================================================================
+# LIFECYCLE CONFIGURATION (conditional)
+# =============================================================================
+resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
+  for_each = { for k, v in var.buckets : k => v if length(v.lifecycle_rules) > 0 }
+  
+  bucket = aws_s3_bucket.buckets[each.key].id
 
   rule {
-    id     = "processed_images_lifecycle"
+    id     = "${each.key}_lifecycle"
     status = "Enabled"
 
     filter {
       prefix = ""
     }
 
-    # Transición a IA después de 30 días (acceso menos frecuente)
-    transition {
-      days          = 30
-      storage_class = "STANDARD_IA"
+    # Dynamic transitions based on configuration
+    dynamic "transition" {
+      for_each = each.value.lifecycle_rules
+      content {
+        days          = transition.value.transition_days
+        storage_class = transition.value.storage_class
+      }
     }
 
-    # Transición a Glacier después de 90 días (archivado)
-    transition {
-      days          = 90
-      storage_class = "GLACIER"
-    }
-
-    # Eliminar versiones no actuales después de 365 días
-    noncurrent_version_expiration {
-      noncurrent_days = 365
+    # Noncurrent version expiration (conditional)
+    dynamic "noncurrent_version_expiration" {
+      for_each = each.value.noncurrent_version_expiration_days > 0 ? [1] : []
+      content {
+        noncurrent_days = each.value.noncurrent_version_expiration_days
+      }
     }
   }
 }
-
 
 # =============================================================================
 # OUTPUTS
 # =============================================================================
 
+output "bucket_names" {
+  value = { for k, v in aws_s3_bucket.buckets : k => v.bucket }
+  description = "Map of bucket names by key"
+}
+
+output "bucket_arns" {
+  value = { for k, v in aws_s3_bucket.buckets : k => v.arn }
+  description = "Map of bucket ARNs by key"
+}
+
+output "website_endpoints" {
+  value = { for k, v in aws_s3_bucket_website_configuration.website : k => v.website_endpoint }
+  description = "Map of website endpoints for buckets with website hosting enabled"
+}
+
+# Legacy outputs for backwards compatibility
 output "frontend_bucket_name" {
-  value       = aws_s3_bucket.frontend.bucket
-  description = "Nombre del bucket donde se hostea el frontend"
+  value       = try(aws_s3_bucket.buckets["frontend"].bucket, "")
+  description = "Frontend bucket name (backwards compatibility)"
+}
+
+output "raw_images_bucket_name" {
+  value       = try(aws_s3_bucket.buckets["raw-images"].bucket, "")
+  description = "Raw images bucket name (backwards compatibility)"
+}
+
+output "raw_images_bucket_arn" {
+  value       = try(aws_s3_bucket.buckets["raw-images"].arn, "")
+  description = "Raw images bucket ARN (backwards compatibility)"
+}
+
+output "processed_images_bucket_name" {
+  value       = try(aws_s3_bucket.buckets["processed-images"].bucket, "")
+  description = "Processed images bucket name (backwards compatibility)"
+}
+
+output "processed_images_bucket_arn" {
+  value       = try(aws_s3_bucket.buckets["processed-images"].arn, "")
+  description = "Processed images bucket ARN (backwards compatibility)"
 }
 
 output "frontend_bucket_website_endpoint" {
-  value       = aws_s3_bucket_website_configuration.frontend.website_endpoint
-  description = "URL de hosting web estático del frontend"
+  value       = try(aws_s3_bucket_website_configuration.website["frontend"].website_endpoint, "")
+  description = "Frontend website endpoint (backwards compatibility)"
 }
-
