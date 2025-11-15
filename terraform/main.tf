@@ -233,6 +233,10 @@ module "api_gateway" {
   depends_on = [module.sqs, module.lambda]
 }
 
+# =============================================================================
+# FARGATE ECS CONFIGURATION  
+# =============================================================================
+
 module "fargate" {
   source = "./modules/fargate"
 
