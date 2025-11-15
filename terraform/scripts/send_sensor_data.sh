@@ -3,6 +3,7 @@
 # =============================================================================
 # SCRIPT: SEND SENSOR DATA TO SQS QUEUE
 # Descripción: Envía mensajes de datos de sensores a la cola SQS durante 10 minutos
+# Usage: ./send_sensor_data.sh [--date DD-MM-YYYY]
 # =============================================================================
 
 set -e
@@ -20,15 +21,76 @@ echo -e "${BLUE}    AGROSYNCHRO - SENSOR DATA GENERATOR${NC}"
 echo -e "${BLUE}=====================================================${NC}"
 echo ""
 
-# Función para generar timestamp ISO 8601
+# Parsear argumentos
+CUSTOM_DATE=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --date)
+            CUSTOM_DATE="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: $0 [--date DD-MM-YYYY]"
+            echo ""
+            echo "Options:"
+            echo "  --date DD-MM-YYYY    Usar fecha específica (default: hoy)"
+            echo "  -h, --help           Mostrar esta ayuda"
+            echo ""
+            echo "Example:"
+            echo "  $0                    # Usa fecha de hoy"
+            echo "  $0 --date 15-11-2025  # Usa fecha específica"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}❌ Error: Argumento desconocido '$1'${NC}"
+            echo "Use --help para ver opciones disponibles"
+            exit 1
+            ;;
+    esac
+done
+
+# Validar y convertir fecha si se proporcionó
+TARGET_DATE=""
+if [ -n "$CUSTOM_DATE" ]; then
+    # Validar formato DD-MM-YYYY
+    if [[ ! "$CUSTOM_DATE" =~ ^[0-9]{2}-[0-9]{2}-[0-9]{4}$ ]]; then
+        echo -e "${RED}❌ Error: Formato de fecha inválido${NC}"
+        echo -e "${YELLOW}💡 Use formato: DD-MM-YYYY (ejemplo: 15-11-2025)${NC}"
+        exit 1
+    fi
+    
+    # Convertir DD-MM-YYYY a YYYY-MM-DD para uso interno
+    DAY=$(echo "$CUSTOM_DATE" | cut -d'-' -f1)
+    MONTH=$(echo "$CUSTOM_DATE" | cut -d'-' -f2)
+    YEAR=$(echo "$CUSTOM_DATE" | cut -d'-' -f3)
+    TARGET_DATE="${YEAR}-${MONTH}-${DAY}"
+    
+    # Validar que la fecha sea válida
+    if ! date -j -f "%Y-%m-%d" "$TARGET_DATE" >/dev/null 2>&1; then
+        echo -e "${RED}❌ Error: Fecha inválida${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}📅 Usando fecha personalizada: ${CUSTOM_DATE}${NC}"
+else
+    # Usar fecha de hoy
+    TARGET_DATE=$(date +"%Y-%m-%d")
+    echo -e "${GREEN}📅 Usando fecha de hoy: $(date +"%d-%m-%Y")${NC}"
+fi
+echo ""
+
+# Función para generar timestamp ISO 8601 con la fecha objetivo
 generate_timestamp() {
-    date -u +"%Y-%m-%dT%H:%M:%SZ"
+    local base_date="$1"
+    local time_part=$(date +"%H:%M:%S")
+    echo "${base_date}T${time_part}Z"
 }
 
 # Función para generar valores aleatorios de sensores
 generate_sensor_data() {
     local user_id=$1
-    local timestamp=$(generate_timestamp)
+    local target_date=$2
+    local timestamp=$(generate_timestamp "$target_date")
     
     # Generar valores aleatorios realistas
     local temperature=$(echo "scale=1; 15 + $RANDOM % 30 + ($RANDOM % 100) / 100" | bc)
@@ -95,6 +157,7 @@ done
 echo ""
 echo -e "${GREEN}🚀 Iniciando envío de datos de sensores...${NC}"
 echo -e "${YELLOW}📊 User ID: ${USER_ID}${NC}"
+echo -e "${YELLOW}📅 Fecha objetivo: ${TARGET_DATE}${NC}"
 echo -e "${YELLOW}⏱️  Duración: 10 minutos${NC}"
 echo -e "${YELLOW}🔄 Intervalo: 10 segundos${NC}"
 echo -e "${YELLOW}🎯 Cola: ${SQS_QUEUE_URL}${NC}"
@@ -124,7 +187,7 @@ while [ $(date +%s) -lt $END_TIME ]; do
     CURRENT_TIME=$(date "+%H:%M:%S")
     
     # Generar datos del sensor
-    SENSOR_DATA=$(generate_sensor_data $USER_ID)
+    SENSOR_DATA=$(generate_sensor_data $USER_ID "$TARGET_DATE")
     
     echo -e "${BLUE}📤 [$CURRENT_TIME] Enviando mensaje #${MESSAGE_COUNT}...${NC}"
     echo -e "${YELLOW}   Datos: $(echo $SENSOR_DATA | tr -d '\n' | tr -s ' ')${NC}"
