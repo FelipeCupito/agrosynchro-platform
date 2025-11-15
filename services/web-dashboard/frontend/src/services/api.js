@@ -54,3 +54,6 @@ export const getReports = (userId) => {
   return axiosInstance.get(url);
 };
 export const postReport = ({ userid, date }) => axiosInstance.post(`${API_URL}/reports?user_id=${userid}&date=${date}`);
+
+// Imágenes de drones
+export const getDroneImages = (userId) => axiosInstance.get(`${API_URL}/images?user_id=${userId}`);
