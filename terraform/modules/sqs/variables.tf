@@ -44,3 +44,29 @@ variable "dlq_message_retention_seconds" {
   type        = number
   default     = 1209600 # 14 days
 }
+
+# === NUEVAS VARIABLES PARA REUTILIZACIÓN ===
+
+variable "queue_name_suffix" {
+  description = "Suffix for the main queue name (e.g., 'messages-queue', 'tasks-queue')"
+  type        = string
+  default     = "messages-queue"
+}
+
+variable "dlq_name_suffix" {
+  description = "Suffix for the dead letter queue name (e.g., 'messages-dlq', 'tasks-dlq')"
+  type        = string
+  default     = "messages-dlq"
+}
+
+variable "additional_tags" {
+  description = "Additional tags to apply to all SQS resources"
+  type        = map(string)
+  default     = {}
+}
+
+variable "queue_purpose" {
+  description = "Purpose/type of the queue for tagging (e.g., 'sensor_messages', 'image_processing')"
+  type        = string
+  default     = "general"
+}

@@ -1,6 +1,6 @@
-# SQS Queue for Sensor Messages
+# SQS Main Queue - Configurable for multiple use cases
 resource "aws_sqs_queue" "main" {
-  name                       = "${var.project_name}-messages-queue"
+  name                       = "${var.project_name}-${var.queue_name_suffix}"
   delay_seconds              = var.delay_seconds
   max_message_size           = var.max_message_size
   message_retention_seconds  = var.message_retention_seconds
@@ -16,24 +16,25 @@ resource "aws_sqs_queue" "main" {
     maxReceiveCount     = var.max_receive_count
   })
 
-  tags = {
-    Name = "${var.project_name}-messages-queue"
-    Type = "sensor_messages"
-  }
+  tags = merge({
+    Name = "${var.project_name}-${var.queue_name_suffix}"
+    Type = var.queue_purpose
+  }, var.additional_tags)
 }
 
-# Dead Letter Queue
+# Dead Letter Queue - Configurable naming
 resource "aws_sqs_queue" "dlq" {
-  name                      = "${var.project_name}-messages-dlq"
+  name                      = "${var.project_name}-${var.dlq_name_suffix}"
   message_retention_seconds = var.dlq_message_retention_seconds
 
   # Enable server-side encryption
   kms_master_key_id                 = "alias/aws/sqs"
   kms_data_key_reuse_period_seconds = 300
 
-  tags = {
-    Name = "${var.project_name}-messages-dlq"
-  }
+  tags = merge({
+    Name = "${var.project_name}-${var.dlq_name_suffix}"
+    Type = "dead_letter_queue"
+  }, var.additional_tags)
 }
 
 # Use existing LabRole for API Gateway
