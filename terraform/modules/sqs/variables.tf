@@ -45,8 +45,6 @@ variable "dlq_message_retention_seconds" {
   default     = 1209600 # 14 days
 }
 
-# === NUEVAS VARIABLES PARA REUTILIZACIÓN ===
-
 variable "queue_name_suffix" {
   description = "Suffix for the main queue name (e.g., 'messages-queue', 'tasks-queue')"
   type        = string

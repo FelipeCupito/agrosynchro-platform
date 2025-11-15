@@ -108,17 +108,20 @@ module "vpc_endpoints" {
   tags = local.common_tags
 }
 
+# =============================================================================
+# SQS MESSAGING CONFIGURATION
+# =============================================================================
+
 module "sqs" {
   source = "./modules/sqs"
 
   project_name = local.project_name
   
-  # Configure for sensor messages (backwards compatibility)
+  # Configure for sensor messages
   queue_name_suffix = "messages-queue"
   dlq_name_suffix   = "messages-dlq"
   queue_purpose     = "sensor_messages"
   
-  # Optional: Add environment-specific tags
   additional_tags = {
     Environment = local.environment
     Component   = "messaging"
