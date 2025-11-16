@@ -48,8 +48,19 @@ aws-credentials
 *.tfstate
 *.tfstate.backup
 *.tfstate.lock.info
+.terraform.lock.hcl
 tfplan*
+tfplan-*
 .current_plan
+.rebuild_processing_engine
+crash.log
+crash.*.log
+terraform.rc
+.terraformrc
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
 
 # Lambda deployment packages (generated files)
 **/lambda.zip
@@ -58,3 +69,5 @@ tfplan*
 # claude
 .claude/
 terraform/terraform.tfstate.backup-pre-refactor
+
+*.hcl

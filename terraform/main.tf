@@ -342,6 +342,10 @@ module "rds_read_replica" {
 
   identifier = "${local.project_name}-postgres-replica"
 
+  engine               = "postgres"
+  family               = "postgres15"
+  major_engine_version = "15"
+
   replicate_source_db = module.rds.db_instance_identifier
   instance_class      = var.db_instance_class
 
