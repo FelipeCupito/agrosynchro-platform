@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-
 # =============================================================================
-# AGROSYNCHRO - SCRIPT DE DEPLOYMENT ROBUSTO
+# AGROSYNCHRO - DEPLOY SIMPLIFICADO
 # =============================================================================
-# Propósito: Deployment completo y confiable para entorno AWS Academy
-# Autor: Recuperatorio TP - Infraestructura como Código
-# Versión: 2.0 - Ultra Robusto
+# Propósito: Deployment razonablemente robusto pero mantenible
+# Entorno:   AWS Academy (cada alumno con su propia cuenta)
 # =============================================================================
 
 set -euo pipefail
@@ -14,21 +12,24 @@ set -euo pipefail
 # CONFIGURACIÓN Y CONSTANTES
 # =============================================================================
 
-# Colores para output legible
+# Colores
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m'
-readonly PURPLE='\033[0;35m'
 readonly NC='\033[0m'
 
-# Directorios calculados dinámicamente
+# Directorios
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 readonly TF_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly SERVICES_DIR="$PROJECT_ROOT/services"
 
-# Variables de control
+# Tag usado para detectar recursos del proyecto en AWS
+readonly PROJECT_TAG_KEY="Project"
+readonly PROJECT_TAG_VALUE="agrosynchro"
+
+# Flags
 AUTO_APPROVE=false
 SKIP_INIT=false
 SKIP_FRONTEND=false
@@ -36,1074 +37,383 @@ SKIP_PROCESSING=false
 VERBOSE=false
 
 # =============================================================================
-# FUNCIONES DE LOGGING
+# LOGGING Y ERRORES
 # =============================================================================
 
-log() { echo -e "$1" >&2; }
-log_info() { log "${BLUE}ℹ️  $1${NC}"; }
+log()         { echo -e "$1" >&2; }
+log_info()    { log "${BLUE}ℹ️  $1${NC}"; }
 log_success() { log "${GREEN}✅ $1${NC}"; }
 log_warning() { log "${YELLOW}⚠️  $1${NC}"; }
-log_error() { log "${RED}❌ $1${NC}"; }
-log_debug() { 
-    if [[ "$VERBOSE" == "true" ]]; then 
-        log "${PURPLE}🔍 DEBUG: $1${NC}"
-    fi
-    return 0  # Siempre retornar exitoso
+log_error()   { log "${RED}❌ $1${NC}"; }
+
+log_debug() {
+  if [[ "$VERBOSE" == "true" ]]; then
+    log "🔍 $1"
+  fi
 }
 
-# =============================================================================
-# MANEJO ROBUSTO DE ERRORES
-# =============================================================================
-
-handle_script_error() {
-    local exit_code=$?
-    local line_no=$1
-    
-    case $exit_code in
-        130)
-            log_warning "Script interrumpido por usuario (Ctrl+C)"
-            exit 130
-            ;;
-        1)
-            # Error común que puede ser temporal
-            if [[ "$VERBOSE" == "true" ]]; then
-                log_error "Error en línea $line_no (código: $exit_code)"
-                log_info "🔍 Ejecutar con --verbose para más detalles"
-            else
-                # En modo no-verbose, solo mostrar error crítico
-                log_error "Error en validaciones iniciales (usar --verbose para detalles)"
-                exit 1
-            fi
-            ;;
-        *)
-            if [[ $exit_code -ne 0 ]]; then
-                log_error "Error inesperado en línea $line_no (código: $exit_code)"
-                log_info "🔍 Para más detalles, ejecutar con --verbose"
-                exit $exit_code
-            fi
-            ;;
-    esac
+on_error() {
+  local exit_code=$?
+  local line_no=$1
+  log_error "El script falló en la línea $line_no (código $exit_code)"
 }
 
-# Trap para manejar errores automáticamente
-trap 'handle_script_error $LINENO' ERR
+trap 'on_error $LINENO' ERR
 
-# Función wrapper para comandos con pipe que pueden causar SIGPIPE
-safe_pipe_command() {
-    local max_retries=3
-    local retry_count=0
-    
-    while [[ $retry_count -lt $max_retries ]]; do
-        # Temporalmente desactivar set -e para capturar el código de salida
-        set +e
-        "$@" 2>/dev/null
-        local exit_code=$?
-        set -e
-        
-        if [[ $exit_code -eq 0 ]]; then
-            return 0
-        elif [[ $exit_code -eq 141 ]]; then
-            ((retry_count++))
-            if [[ "$VERBOSE" == "true" ]]; then
-                log_warning "SIGPIPE detectado (intento $retry_count/$max_retries)"
-            fi
-            if [[ $retry_count -lt $max_retries ]]; then
-                if [[ "$VERBOSE" == "true" ]]; then
-                    log_info "🔄 Reintentando en 2 segundos..."
-                fi
-                sleep 2
-            else
-                if [[ "$VERBOSE" == "true" ]]; then
-                    log_warning "Comando con pipe falló después de $max_retries intentos, continuando..."
-                fi
-                return 0  # Continuar de todos modos
-            fi
-        else
-            return $exit_code
-        fi
-    done
+run() {
+  log_debug "Ejecutando: $*"
+  "$@"
 }
 
 show_banner() {
-    cat << 'EOF'
-╔══════════════════════════════════════════════════════════════╗
-║               🚀 AGROSYNCHRO DEPLOYMENT v2.0                 ║
-║                                                              ║
-║  Script robusto para deployment completo en AWS Academy     ║
-║  ✅ Validaciones exhaustivas                                ║
-║  🔄 Retry automático en fallos                              ║
-║  📊 Monitoreo en tiempo real                                ║
-║  🛡️  Rollback automático en errores críticos               ║
-╚══════════════════════════════════════════════════════════════╝
+  cat << 'EOF'
+╔══════════════════════════════════════════════════════╗
+║        🚀 AGROSYNCHRO DEPLOY (versión simple)        ║
+║                                                      ║
+║        ⚠️  MODO: SIEMPRE DESDE CERO                  ║
+║        🧹 Destruye todo y redeploya                  ║
+╚══════════════════════════════════════════════════════╝
 EOF
 }
 
 # =============================================================================
-# FUNCIONES DE VALIDACIÓN
+# VALIDACIONES BÁSICAS
 # =============================================================================
 
 validate_dependencies() {
-    log_info "Validando dependencias del sistema..."
-    
-    # Temporalmente desactivar trap para validaciones
-    trap - ERR
-    
-    local missing_deps=()
-    
-    # Herramientas requeridas
-    local required_tools=("terraform" "aws" "docker" "node" "npm" "jq" "bc")
-    
-    for tool in "${required_tools[@]}"; do
-        if ! command -v "$tool" >/dev/null 2>&1; then
-            missing_deps+=("$tool")
-            log_error "$tool no está instalado"
-        else
-            local version
-            case "$tool" in
-                terraform) 
-                    # Evitar SIGPIPE - usar terraform version directamente
-                    set +e
-                    version=$(terraform version 2>/dev/null | { read -r first_line; echo "$first_line"; } || echo "terraform installed")
-                    set -e
-                    ;;
-                aws) 
-                    set +e
-                    version=$(aws --version 2>/dev/null || echo "aws installed")
-                    set -e
-                    ;;
-                docker) 
-                    set +e
-                    version=$(docker --version 2>/dev/null || echo "docker installed")
-                    set -e
-                    ;;
-                node) 
-                    set +e
-                    version=$(node --version 2>/dev/null || echo "node installed")
-                    set -e
-                    ;;
-                *) 
-                    version="✓" 
-                    ;;
-            esac
-            log_debug "$tool: $version"
-        fi
-    done
-    
-    # Reactivar trap después de validaciones
-    trap 'handle_script_error $LINENO' ERR
-    
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        log_error "Dependencias faltantes: ${missing_deps[*]}"
-        log_info "Instalar dependencias faltantes y reintentar"
-        exit 1
+  log_info "Validando dependencias básicas..."
+
+  local missing=()
+
+  for tool in terraform aws jq; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      missing+=("$tool")
     fi
-    
-    log_success "Todas las dependencias están instaladas"
+  done
+
+  if ((${#missing[@]} > 0)); then
+    log_error "Faltan dependencias: ${missing[*]}"
+    exit 1
+  fi
+
+  log_success "Dependencias básicas OK (terraform, aws, jq)"
+
+  # El resto son opcionales, se avisa en cada fase
 }
 
 validate_aws_access() {
-    log_info "Validando acceso a AWS..."
-    
-    # Temporalmente desactivar trap para validaciones AWS
-    trap - ERR
-    
-    # Verificar que aws CLI esté disponible
-    if ! command -v aws >/dev/null 2>&1; then
-        log_error "AWS CLI no está instalado"
-        log_info "Instalar AWS CLI: https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html"
-        # Reactivar trap antes de salir
-        trap 'handle_script_error $LINENO' ERR
-        exit 1
-    fi
-    
-    # Verificar credentials (problema conocido)
-    set +e
-    aws sts get-caller-identity >/dev/null 2>&1
-    local aws_check=$?
-    set -e
-    
-    if [[ $aws_check -ne 0 ]]; then
-        log_error "AWS CLI no configurado o sin permisos"
-        log_info "Ejecutar: aws configure"
-        log_info "O verificar variables: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY"
-        # Reactivar trap antes de salir
-        trap 'handle_script_error $LINENO' ERR
-        exit 1
-    fi
-    
-    # Verificar región
-    local aws_region
-    set +e
-    aws_region=$(aws configure get region 2>/dev/null || echo "us-east-1")
-    set -e
-    
-    # Verificar LabRole específicamente para AWS Academy
-    local identity
-    set +e
-    identity=$(aws sts get-caller-identity --output text --query 'Arn' 2>/dev/null || echo "")
-    set -e
-    
-    # Reactivar trap después de validaciones AWS
-    trap 'handle_script_error $LINENO' ERR
-    
-    if [[ "$identity" == *"voclabs"* ]] || [[ "$identity" == *"LabRole"* ]]; then
-        log_success "AWS Academy detectado - Compatible"
-    else
-        log_warning "AWS Academy no detectado - OK para entornos regulares"
-    fi
-    
-    log_success "Acceso AWS validado - Región: $aws_region"
+  log_info "Validando acceso a AWS..."
+
+  local arn
+  arn=$(aws sts get-caller-identity --query 'Arn' --output text)
+  local region
+  region=$(aws configure get region 2>/dev/null || echo "us-east-1")
+
+  log_success "AWS OK. ARN: $arn, Región: $region"
 }
 
 validate_project_structure() {
-    log_info "Validando estructura del proyecto..."
-    
-    local required_files=(
-        "$TF_DIR/main.tf"
-        "$TF_DIR/variables.tf" 
-        "$TF_DIR/outputs.tf"
-        "$TF_DIR/terraform.tfvars"
-    )
-    
-    local required_dirs=(
-        "$TF_DIR/modules"
-        "$SERVICES_DIR"
-    )
-    
-    # Verificar archivos críticos
-    for file in "${required_files[@]}"; do
-        if [[ ! -f "$file" ]]; then
-            log_error "Archivo requerido no encontrado: $file"
-            exit 1
-        fi
-    done
-    
-    # Verificar directorios críticos  
-    for dir in "${required_dirs[@]}"; do
-        if [[ ! -d "$dir" ]]; then
-            log_error "Directorio requerido no encontrado: $dir"
-            exit 1
-        fi
-    done
-    
-    log_success "Estructura del proyecto validada"
-}
+  log_info "Validando estructura del proyecto..."
 
-validate_terraform() {
-    log_info "Validando configuración de Terraform..."
-    
-    cd "$TF_DIR"
-    
-    # Verificar formato
-    if ! terraform fmt -check=true >/dev/null 2>&1; then
-        log_warning "Código Terraform necesita formateo"
-        terraform fmt -recursive
-        log_success "Formato corregido automáticamente"
+  local required_files=(
+    "$TF_DIR/main.tf"
+    "$TF_DIR/variables.tf"
+    "$TF_DIR/outputs.tf"
+  )
+
+  local required_dirs=(
+    "$TF_DIR/modules"
+  )
+
+  for f in "${required_files[@]}"; do
+    if [[ ! -f "$f" ]]; then
+      log_error "Falta archivo requerido: $f"
+      exit 1
     fi
-    
-    # Validar sintaxis
-    if ! terraform validate >/dev/null 2>&1; then
-        log_error "Configuración Terraform inválida:"
-        terraform validate
-        exit 1
+  done
+
+  for d in "${required_dirs[@]}"; do
+    if [[ ! -d "$d" ]]; then
+      log_error "Falta directorio requerido: $d"
+      exit 1
     fi
-    
-    log_success "Configuración Terraform válida"
+  done
+
+  log_success "Estructura Terraform OK"
 }
 
-
 # =============================================================================
-# FUNCIONES DE UTILITY
-# =============================================================================
-
-run_command() {
-    local cmd=("$@")
-    
-    log_debug "Ejecutando: ${cmd[*]}"
-    
-    # Ejecutar comando directamente sin timeouts para máxima robustez
-    "${cmd[@]}"
-    return $?
-}
-
-retry_command() {
-    local max_attempts=$1
-    local delay=$2
-    shift 2
-    local cmd=("$@")
-    
-    local attempt=1
-    while [[ $attempt -le $max_attempts ]]; do
-        log_debug "Intento $attempt/$max_attempts: ${cmd[*]}"
-        
-        if "${cmd[@]}"; then
-            return 0
-        fi
-        
-        if [[ $attempt -eq $max_attempts ]]; then
-            log_error "Comando falló después de $max_attempts intentos"
-            return 1
-        fi
-        
-        log_warning "Intento $attempt falló, reintentando en ${delay}s..."
-        sleep "$delay"
-        ((attempt++))
-    done
-}
-
-
-# =============================================================================
-# FUNCIONES DE BUILD
+# BUILD FRONTEND / PROCESSING
 # =============================================================================
 
 build_frontend() {
-    [[ "$SKIP_FRONTEND" == "true" ]] && { 
-        log_warning "Saltando build del frontend (--skip-frontend)"
-        return 0 
-    }
-    
-    local frontend_dir="$SERVICES_DIR/web-dashboard/frontend"
-    
-    if [[ ! -d "$frontend_dir" ]]; then
-        log_warning "Frontend no encontrado en $frontend_dir - Saltando"
-        return 0
-    fi
-    
-    log_info "🎨 Construyendo frontend..."
-    cd "$frontend_dir"
-    
-    # Verificar package.json
-    if [[ ! -f "package.json" ]]; then
-        log_warning "package.json no encontrado - Saltando frontend"
-        return 0
-    fi
-    
-    # Limpiar cache si existe
-    if [[ -d "node_modules" ]]; then
-        log_debug "Limpiando node_modules existente..."
-        rm -rf node_modules
-    fi
-    
-    # Instalar dependencias con retry
-    log_info "📦 Instalando dependencias..."
-    if ! retry_command 3 10 run_command npm ci --silent; then
-        log_error "Falló instalación de dependencias del frontend"
-        return 1
-    fi
-    
-    # Build del frontend
-    log_info "🔨 Compilando frontend..."
-    if ! run_command npm run build; then
-        log_error "Falló compilación del frontend"
-        return 1
-    fi
-    
-    # Verificar que el build se generó
-    if [[ ! -d "build" ]] || [[ -z "$(ls -A build 2>/dev/null)" ]]; then
-        log_error "Build del frontend está vacío o no se generó"
-        return 1
-    fi
-    
-    log_success "Frontend compilado exitosamente"
+  if [[ "$SKIP_FRONTEND" == "true" ]]; then
+    log_info "Saltando frontend (--skip-frontend)"
+    return 0
+  fi
+
+  local frontend_dir="$SERVICES_DIR/web-dashboard/frontend"
+
+  if [[ ! -d "$frontend_dir" ]]; then
+    log_warning "Frontend no encontrado en $frontend_dir, se omite"
+    return 0
+  fi
+
+  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    log_warning "Node/npm no instalados. No se puede construir el frontend."
+    return 0
+  fi
+
+  log_info "Construyendo frontend..."
+  cd "$frontend_dir"
+
+  if [[ ! -f package.json ]]; then
+    log_warning "package.json no encontrado, se omite build de frontend"
+    return 0
+  fi
+
+  run npm ci
+  run npm run build
+
+  log_success "Frontend compilado"
 }
 
 build_processing_engine() {
-    [[ "$SKIP_PROCESSING" == "true" ]] && {
-        log_warning "Saltando build del processing engine (--skip-processing)"
-        return 0
-    }
-    
-    local processing_dir="$SERVICES_DIR/processing-engine"
-    
-    if [[ ! -d "$processing_dir" ]]; then
-        log_warning "Processing engine no encontrado en $processing_dir - Saltando"
-        return 0
-    fi
-    
-    log_info "🐳 Construyendo Processing Engine..."
-    cd "$processing_dir"
-    
-    # Verificar Dockerfile
-    if [[ ! -f "Dockerfile" ]]; then
-        log_warning "Dockerfile no encontrado - Saltando processing engine"
-        return 0
-    fi
-    
-    # Verificar Docker daemon
-    if ! docker info >/dev/null 2>&1; then
-        log_error "Docker daemon no está corriendo"
-        log_info "Iniciar Docker Desktop o servicio Docker"
-        return 1
-    fi
-    
-    # Ejecutar script de actualización ECR
-    local ecr_script="$SCRIPT_DIR/update-docker-ecr.sh"
-    if [[ -x "$ecr_script" ]]; then
-        log_info "📦 Ejecutando build y deploy a ECR..."
-        if ! run_command "$ecr_script"; then
-            log_error "Falló build del processing engine"
-            return 1
-        fi
-    else
-        log_error "Script ECR no encontrado: $ecr_script"
-        log_info "Verificar que existe: $ecr_script"
-        return 1
-    fi
-    
-    log_success "Processing Engine construido y subido a ECR"
+  if [[ "$SKIP_PROCESSING" == "true" ]]; then
+    log_info "Saltando processing (--skip-processing)"
+    return 0
+  fi
+
+  local pe_dir="$SERVICES_DIR/processing-engine"
+  local ecr_script="$SCRIPT_DIR/update-docker-ecr.sh"
+
+  if [[ ! -d "$pe_dir" ]]; then
+    log_warning "Processing engine no encontrado en $pe_dir, se omite"
+    return 0
+  fi
+
+  if [[ ! -x "$ecr_script" ]]; then
+    log_warning "Script $ecr_script no encontrado o no ejecutable, se omite processing"
+    return 0
+  fi
+
+  if ! command -v docker >/dev/null 2>&1; then
+    log_warning "Docker no instalado. No se puede construir processing engine."
+    return 0
+  fi
+
+  log_info "Construyendo processing engine + push a ECR..."
+  cd "$pe_dir"
+  run "$ecr_script"
+  log_success "Processing engine construido y subido a ECR"
 }
 
 # =============================================================================
-# FUNCIONES DE TERRAFORM
+# TERRAFORM
 # =============================================================================
 
 terraform_init() {
-    if [[ "$SKIP_INIT" == "true" ]]; then
-        log_warning "Saltando terraform init (--skip-init)"
-        return 0
-    fi
-    
-    # Verificar si ya se hizo init en resolve_conflicts
-    if [[ -f "$TF_DIR/.terraform.lock.hcl" && -d "$TF_DIR/.terraform" ]]; then
-        log_info "✅ Terraform ya inicializado (por resolución de conflictos)"
-        return 0
-    fi
-    
-    log_info "🔧 Inicializando Terraform..."
-    cd "$TF_DIR"
-    
-    # Retry terraform init (puede fallar por red)
-    if ! retry_command 3 15 run_command terraform init -input=false; then
-        log_error "terraform init falló después de múltiples intentos"
-        log_info "Verificar conectividad a internet para descargar módulos"
-        return 1
-    fi
-    
-    log_success "Terraform inicializado exitosamente"
-}
+  if [[ "$SKIP_INIT" == "true" ]]; then
+    log_info "Saltando terraform init (--skip-init)"
+    return 0
+  fi
 
-sync_terraform_state() {
-    log_info "🔄 Sincronizando estado de Terraform con AWS..."
-    cd "$TF_DIR"
-    
-    # Ejecutar refresh para sincronizar estado con realidad de AWS
-    log_info "Ejecutando terraform refresh para detectar cambios..."
-    if ! run_command terraform plan -refresh-only -input=false >/dev/null 2>&1; then
-        log_warning "terraform refresh falló - posibles discrepancias de estado"
-        
-        # Ofrecer opciones de recuperación
-        if [[ "$AUTO_APPROVE" == "false" ]]; then
-            echo ""
-            log_warning "⚠️  ESTADO DESINCRONIZADO DETECTADO"
-            echo ""
-            echo "El estado de Terraform no coincide con AWS. Opciones:"
-            echo "   1. [REFRESH] Aplicar refresh para sincronizar (recomendado)"
-            echo "   2. [IGNORE] Continuar sin sincronizar (puede causar errores)"
-            echo "   3. [CLEAN] Eliminar estado y empezar limpio (PELIGROSO)"
-            echo ""
-            read -p "Seleccionar opción (1/2/3): " -n 1 -r
-            echo ""
-            
-            case $REPLY in
-                1) 
-                    log_info "Aplicando refresh para sincronizar estado..."
-                    if run_command terraform apply -refresh-only -auto-approve -input=false; then
-                        log_success "Estado sincronizado exitosamente"
-                    else
-                        log_error "Falló sincronización - revisar manualmente"
-                        return 1
-                    fi
-                    ;;
-                2) 
-                    log_warning "Continuando sin sincronizar - cuidado con errores"
-                    ;;
-                3)
-                    log_warning "⚠️  ELIMINANDO estado de Terraform..."
-                    read -p "¿Estás SEGURO? (escribir 'DELETE'): " confirm
-                    if [[ "$confirm" == "DELETE" ]]; then
-                        rm -f "$TF_DIR/terraform.tfstate"*
-                        log_warning "Estado eliminado - deployment será completamente nuevo"
-                    else
-                        log_info "Eliminación cancelada"
-                        return 1
-                    fi
-                    ;;
-                *)
-                    log_error "Opción inválida"
-                    return 1
-                    ;;
-            esac
-        else
-            # En modo auto-approve, aplicar refresh automáticamente
-            log_info "Modo auto-approve: Aplicando refresh automático..."
-            if run_command terraform apply -refresh-only -auto-approve -input=false; then
-                log_success "Estado sincronizado automáticamente"
-            else
-                log_error "Falló sincronización automática"
-                return 1
-            fi
-        fi
-    else
-        log_success "Estado ya sincronizado con AWS"
-    fi
+  log_info "Inicializando Terraform..."
+  cd "$TF_DIR"
+  run terraform init -input=false
+  log_success "terraform init OK"
 }
 
 terraform_plan() {
-    log_info "📋 Generando plan de Terraform..."
-    cd "$TF_DIR"
-    
-    local plan_file="tfplan-$(date +%Y%m%d-%H%M%S)"
-    
-    if ! run_command terraform plan -out="$plan_file" -input=false; then
-        log_error "terraform plan falló"
-        return 1
-    fi
-    
-    # Mostrar resumen del plan para revisión
-    log_info "📊 Resumen del plan:"
-    terraform show -no-color "$plan_file" | grep -E "(Plan:|No changes)" || true
-    
-    # Guardar nombre del plan para apply
-    echo "$plan_file" > ".current_plan"
-    
-    log_success "Plan generado: $plan_file"
-    
-    # Pausa para revisión en modo interactivo (mejor práctica)
-    if [[ "$AUTO_APPROVE" == "false" && "$VERBOSE" == "true" ]]; then
-        echo ""
-        log_info "💡 Ejecutar 'terraform show $plan_file' para ver plan detallado"
-        read -p "Presionar ENTER para continuar con apply..." -r
-    fi
-}
+  log_info "Generando plan Terraform..."
+  cd "$TF_DIR"
 
-handle_terraform_errors() {
-    local error_log="$1"
-    
-    # Buscar errores conocidos y aplicar fixes automáticos
-    if grep -q "RepositoryAlreadyExistsException.*agrosynchro-processing-engine" "$error_log" 2>/dev/null; then
-        log_warning "ECR Repository ya existe - aplicando fix automático..."
-        
-        # Eliminar ECR existente para garantizar imagen actualizada
-        if aws ecr delete-repository --repository-name agrosynchro-processing-engine --force --region us-east-1 >/dev/null 2>&1; then
-            log_success "ECR Repository eliminado - se garantiza imagen actualizada"
-            
-            # Marcar que necesitamos rebuilder la imagen
-            touch "$TF_DIR/.rebuild_processing_engine"
-            log_info "Imagen de processing engine será reconstruida con código más reciente"
-            
-            return 0
-        else
-            log_error "No se pudo eliminar ECR - deployment no puede garantizar código actualizado"
-            log_info "Solución manual: aws ecr delete-repository --repository-name agrosynchro-processing-engine --force"
-            return 1
-        fi
-    fi
-    
-    # Agregar más fixes automáticos aquí para otros errores comunes
-    return 1
+  local plan_file="tfplan"
+  run terraform plan -out="$plan_file" -input=false
+  log_success "Plan generado en $plan_file"
+
+  if [[ "$VERBOSE" == "true" ]]; then
+    log_info "Resumen del plan:"
+    terraform show -no-color "$plan_file" | sed -n '1,40p' || true
+  fi
 }
 
 terraform_apply() {
-    log_info "🚀 Aplicando cambios de infraestructura..."
-    cd "$TF_DIR"
-    
-    local plan_file
-    if [[ -f ".current_plan" ]]; then
-        plan_file=$(cat ".current_plan")
-        rm -f ".current_plan"
-    else
-        log_error "No se encontró plan de Terraform"
-        return 1
-    fi
-    
-    if [[ ! -f "$plan_file" ]]; then
-        log_error "Archivo de plan no encontrado: $plan_file"
-        return 1
-    fi
-    
-    # Apply con recuperación automática de errores
-    local apply_log
-    apply_log=$(mktemp)
-    
-    # Usar safe_pipe_command para evitar SIGPIPE con tee
-    if safe_pipe_command bash -c "terraform apply -input=false '$plan_file' 2>&1 | tee '$apply_log'"; then
-        log_success "Infraestructura desplegada exitosamente"
-        rm -f "$plan_file" "$apply_log"
-        return 0
-    else
-        log_warning "Apply inicial falló - intentando recuperación automática..."
-        
-        # Intentar recuperación automática
-        if handle_terraform_errors "$apply_log"; then
-            log_info "🔄 Reintentando apply después de fix automático..."
-            
-            # Regenerar plan y aplicar
-            local new_plan="tfplan-recovery-$(date +%Y%m%d-%H%M%S)"
-            if run_command terraform plan -out="$new_plan" -input=false && \
-               run_command terraform apply -input=false "$new_plan"; then
-                log_success "Infraestructura desplegada exitosamente (con recuperación)"
-                
-                # Rebuild processing engine si es necesario
-                if [[ -f "$TF_DIR/.rebuild_processing_engine" ]]; then
-                    log_info "🔄 Rebuilding processing engine después de ECR recovery..."
-                    rm -f "$TF_DIR/.rebuild_processing_engine"
-                    
-                    # Rebuild processing engine
-                    if build_processing_engine; then
-                        log_success "Processing engine rebuildeado exitosamente"
-                    else
-                        log_warning "Falló rebuild de processing engine - puede causar problemas en Fargate"
-                    fi
-                fi
-                
-                rm -f "$plan_file" "$new_plan" "$apply_log"
-                return 0
-            else
-                log_error "Apply falló incluso después de recuperación automática"
-                rm -f "$plan_file" "$new_plan" "$apply_log"
-                return 1
-            fi
-        else
-            log_error "terraform apply falló y no se pudo recuperar automáticamente"
-            rm -f "$plan_file" "$apply_log"
-            return 1
-        fi
-    fi
+  log_info "Aplicando plan Terraform..."
+  cd "$TF_DIR"
+
+  local plan_file="tfplan"
+  if [[ ! -f "$plan_file" ]]; then
+    log_error "No se encuentra el archivo de plan $plan_file"
+    exit 1
+  fi
+
+  local args=("-input=false")
+  if [[ "$AUTO_APPROVE" == "true" ]]; then
+    args+=("-auto-approve")
+  fi
+  args+=("$plan_file")
+
+  run terraform apply "${args[@]}"
+  log_success "Infraestructura desplegada"
 }
 
 # =============================================================================
-# CONFIGURACIÓN POST-DEPLOYMENT
+# DESTROY Y REDEPLOY DESDE CERO (ENFOQUE SIMPLE)
 # =============================================================================
 
-configure_lambdas() {
-    log_info "⚙️  Configurando servicios post-deployment..."
-    cd "$TF_DIR"
-    
-    # Extraer outputs con manejo de errores
-    local outputs
-    outputs=$(terraform output -json 2>/dev/null || echo '{}')
-    
-    local cognito_domain cognito_client_id frontend_url region
-    cognito_domain=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.cognito_domain.value // \"\"'" 2>/dev/null || echo "")
-    cognito_client_id=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.cognito_client_id.value // \"\"'" 2>/dev/null || echo "")  
-    frontend_url=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.frontend_website_url.value // \"\"'" 2>/dev/null || echo "")
-    region=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.region.value // \"us-east-1\"'" 2>/dev/null || echo "us-east-1")
-    
-    # Configurar Cognito Lambda si los valores están disponibles
-    if [[ -n "$cognito_domain" && -n "$cognito_client_id" ]]; then
-        configure_cognito_lambda "$cognito_domain" "$cognito_client_id" "$frontend_url" "$region"
-    else
-        log_warning "Outputs de Cognito no disponibles, saltando configuración"
-    fi
-    
-    # Inicializar base de datos
-    initialize_database "$region"
-}
+clean_and_reset() {
+  log_info "🧹 MODO SIEMPRE LIMPIO: Eliminando infraestructura existente..."
 
-configure_cognito_lambda() {
-    local cognito_domain=$1
-    local client_id=$2
-    local frontend_url=$3
-    local region=$4
-    
-    local function_name="agrosynchro-cognito-callback"
-    
-    log_info "🔑 Configurando Lambda Cognito..."
-    
-    # Verificar que la función existe
-    if ! aws lambda get-function --function-name "$function_name" --region "$region" >/dev/null 2>&1; then
-        log_warning "Lambda $function_name no encontrada, saltando configuración"
-        return 0
-    fi
-    
-    # Preparar configuración
-    local env_json
-    env_json=$(jq -n \
-        --arg domain "$cognito_domain" \
-        --arg client_id "$client_id" \
-        --arg frontend_url "$frontend_url" \
-        '{Variables: {COGNITO_DOMAIN: $domain, CLIENT_ID: $client_id, FRONTEND_URL: $frontend_url}}'
-    )
-    
-    # Actualizar configuración con retry
-    if retry_command 3 5 aws lambda update-function-configuration \
-        --function-name "$function_name" \
-        --environment "$env_json" \
-        --region "$region" \
-        --output json >/dev/null; then
-        log_success "Lambda Cognito configurado"
-    else
-        log_error "Falló configuración de Lambda Cognito"
-        return 1
-    fi
-}
+  cd "$TF_DIR"
 
-initialize_database() {
-    local region=$1
-    local function_name="agrosynchro-init-db"
+  # 1. Intentar destroy si hay state
+  if [[ -f "terraform.tfstate" ]] && [[ -s "terraform.tfstate" ]]; then
+    log_info "Destruyendo infraestructura existente con Terraform..."
     
-    log_info "🗄️  Inicializando base de datos..."
-    
-    # Verificar que la función existe
-    if ! aws lambda get-function --function-name "$function_name" --region "$region" >/dev/null 2>&1; then
-        log_warning "Lambda $function_name no encontrada, saltando inicialización"
-        return 0
-    fi
-    
-    # Crear directorio temporal
-    local temp_dir
-    temp_dir=$(mktemp -d)
-    local response_file="$temp_dir/init_db_response.json"
-    
-    # Invocar función con retry
-    if retry_command 2 10 run_command aws lambda invoke \
-        --function-name "$function_name" \
-        --region "$region" \
-        --payload '{}' \
-        --output json \
-        "$response_file" >/dev/null; then
-        
-        # Verificar respuesta
-        if [[ -f "$response_file" ]]; then
-            local status_code
-            status_code=$(safe_pipe_command bash -c "jq -r '.StatusCode // 0' '$response_file'" 2>/dev/null || echo "0")
-            
-            if [[ "$status_code" == "200" ]]; then
-                log_success "Base de datos inicializada"
-            else
-                log_warning "Inicialización de DB completada con código: $status_code"
-            fi
-        fi
+    # Destroy con auto-approve (más seguro que manualmente)
+    if run terraform destroy -auto-approve -input=false; then
+      log_success "✅ Infraestructura destruida con Terraform"
     else
-        log_warning "Falló inicialización de base de datos - Continuar manualmente"
+      log_warning "⚠️  Destroy falló, pero continuaremos (puede que no haya recursos)"
     fi
-    
-    # Limpiar
-    rm -rf "$temp_dir"
+  else
+    log_info "No hay state local, saltando destroy de Terraform"
+  fi
+
+  # 2. Limpiar archivos de state locales
+  log_info "Limpiando state local..."
+  rm -f terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl 2>/dev/null || true
+  rm -rf .terraform/terraform.tfstate 2>/dev/null || true
+  
+  # 3. Limpiar planes anteriores
+  rm -f tfplan tfplan-* 2>/dev/null || true
+
+  log_success "✅ Limpieza completada → próximo deployment será completamente limpio"
 }
 
 # =============================================================================
-# FUNCIONES DE VERIFICACIÓN
+# POST-DEPLOYMENT (resumen muy simple)
 # =============================================================================
 
-verify_deployment() {
-    log_info "🔍 Verificando deployment..."
-    cd "$TF_DIR"
-    
-    local outputs
-    outputs=$(terraform output -json 2>/dev/null || echo '{}')
-    
-    # URLs importantes
-    local api_url frontend_url
-    api_url=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.api_gateway_invoke_url.value // \"\"'" 2>/dev/null || echo "")
-    frontend_url=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.frontend_website_url.value // \"\"'" 2>/dev/null || echo "")
-    
-    local health_checks=0
-    local total_checks=0
-    
-    # Verificar API Gateway
-    if [[ -n "$api_url" ]]; then
-        ((total_checks++))
-        log_info "Verificando API Gateway..."
-        if curl -s -f "$api_url/ping" >/dev/null 2>&1; then
-            ((health_checks++))
-            log_success "API Gateway respondiendo"
-        else
-            log_warning "API Gateway no responde en /ping"
-        fi
-    fi
-    
-    # Verificar Frontend
-    if [[ -n "$frontend_url" ]]; then
-        ((total_checks++))
-        log_info "Verificando Frontend..."
-        if curl -s -f "$frontend_url" >/dev/null 2>&1; then
-            ((health_checks++))
-            log_success "Frontend accesible"
-        else
-            log_warning "Frontend no accesible"
-        fi
-    fi
-    
-    log_info "Verificaciones completadas: $health_checks/$total_checks exitosas"
-    
-    if [[ $health_checks -eq $total_checks && $total_checks -gt 0 ]]; then
-        log_success "Deployment verificado exitosamente"
-        return 0
-    else
-        log_warning "Algunas verificaciones fallaron - Revisar manualmente"
-        return 1
-    fi
-}
+show_outputs_summary() {
+  log_info "Mostrando outputs principales..."
+  cd "$TF_DIR"
 
-show_deployment_summary() {
-    log_info "📊 Resumen del deployment..."
-    cd "$TF_DIR"
-    
-    echo ""
-    echo "╔═══════════════════════════════════════════════════════════════╗"
-    echo "║                    🎉 DEPLOYMENT COMPLETADO                   ║"
-    echo "╚═══════════════════════════════════════════════════════════════╝"
-    echo ""
-    
-    # Mostrar URLs importantes
-    local outputs
-    outputs=$(terraform output -json 2>/dev/null || echo '{}')
-    
-    echo "🌐 URLs Principales:"
-    
-    local frontend_url api_url
-    frontend_url=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.frontend_website_url.value // \"No disponible\"'" || echo "No disponible")
-    api_url=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.api_gateway_invoke_url.value // \"No disponible\"'" || echo "No disponible")
-    
-    echo "   📱 Frontend:    $frontend_url"
-    echo "   🔌 API:         $api_url"
-    echo ""
-    
-    echo "🗄️  Infraestructura:"
-    
-    local rds_endpoint cognito_domain
-    rds_endpoint=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.rds_endpoint.value // \"No disponible\"'" || echo "No disponible")
-    cognito_domain=$(safe_pipe_command bash -c "echo '$outputs' | jq -r '.cognito_domain.value // \"No disponible\"'" || echo "No disponible")
-    
-    echo "   🐘 PostgreSQL:  $rds_endpoint"
-    echo "   🔐 Cognito:     $cognito_domain"
-    echo ""
-    
-    echo "📋 Próximos pasos:"
-    echo "   1. Acceder al frontend para verificar la aplicación"
-    echo "   2. Probar endpoints de la API"
-    echo "   3. Verificar logs en CloudWatch si hay problemas"
-    echo "   4. Ejecutar scripts de testing si están disponibles"
-    echo ""
-    
-    log_success "¡Deployment completado exitosamente! 🎉"
+  if ! terraform output >/dev/null 2>&1; then
+    log_warning "No se pudieron leer outputs de Terraform."
+    return 0
+  fi
+
+  local outputs_json
+  outputs_json=$(terraform output -json)
+
+  local frontend_url api_url
+  frontend_url=$(echo "$outputs_json" | jq -r '.frontend_website_url.value // empty' || true)
+  api_url=$(echo "$outputs_json" | jq -r '.api_gateway_invoke_url.value // empty' || true)
+
+  echo
+  echo "════════════ RESUMEN DEPLOY ════════════"
+  echo "Frontend : ${frontend_url:-No configurado}"
+  echo "API      : ${api_url:-No configurada}"
+  echo "════════════════════════════════════════"
+  echo
 }
 
 # =============================================================================
-# MANEJO DE ARGUMENTOS
+# ARGUMENTOS
 # =============================================================================
 
 show_help() {
-    cat << 'EOF'
-🚀 AgroSynchro - Script de Deployment Robusto v2.0
+  cat << EOF
+Uso: ./deploy.sh [opciones]
 
-DESCRIPCIÓN:
-  Script ultra-robusto para deployment completo de la infraestructura
-  AgroSynchro en AWS Academy. Incluye validaciones exhaustivas, retry
-  automático, y rollback en caso de errores críticos.
-
-USO:
-  ./deploy.sh [OPCIONES]
-
-OPCIONES:
-  -y, --auto-approve     Aplicar cambios automáticamente sin confirmación
-  --skip-init            Saltar terraform init (útil si ya está inicializado)
-  --skip-frontend        Saltar build del frontend
-  --skip-processing      Saltar build del processing engine
-  -v, --verbose          Mostrar información de debug detallada
+Opciones:
+  -y, --auto-approve     Ejecutar terraform apply con -auto-approve
+      --skip-init        No correr terraform init
+      --skip-frontend    No construir el frontend
+      --skip-processing  No construir el processing engine
+  -v, --verbose          Más logs
   -h, --help             Mostrar esta ayuda
-
-EJEMPLOS:
-  ./deploy.sh                              # Deployment interactivo completo
-  ./deploy.sh -y                          # Deployment automático
-  ./deploy.sh --skip-frontend -y          # Solo infraestructura
-  ./deploy.sh --skip-init --verbose       # Sin init, con debug
-
-REQUISITOS:
-  ✅ AWS CLI configurado (preferiblemente con LabRole)
-  ✅ Terraform >= 1.0
-  ✅ Docker Engine (para processing engine)
-  ✅ Node.js + npm (para frontend)
-  ✅ jq, bc (utilities)
-
-Para más información: README.md
 EOF
 }
 
 parse_arguments() {
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -y|--auto-approve)
-                AUTO_APPROVE=true
-                shift
-                ;;
-            --skip-init)
-                SKIP_INIT=true
-                shift
-                ;;
-            --skip-frontend)
-                SKIP_FRONTEND=true
-                shift
-                ;;
-            --skip-processing)
-                SKIP_PROCESSING=true
-                shift
-                ;;
-            -v|--verbose)
-                VERBOSE=true
-                shift
-                ;;
-            -h|--help)
-                show_help
-                exit 0
-                ;;
-            *)
-                log_error "Opción desconocida: $1"
-                echo "Usar --help para ver opciones disponibles"
-                exit 1
-                ;;
-        esac
-    done
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -y|--auto-approve)   AUTO_APPROVE=true; shift ;;
+      --skip-init)         SKIP_INIT=true; shift ;;
+      --skip-frontend)     SKIP_FRONTEND=true; shift ;;
+      --skip-processing)   SKIP_PROCESSING=true; shift ;;
+      -v|--verbose)        VERBOSE=true; shift ;;
+      -h|--help)           show_help; exit 0 ;;
+      *)
+        log_error "Opción desconocida: $1"
+        show_help
+        exit 1
+        ;;
+    esac
+  done
 }
 
 # =============================================================================
-# FUNCIÓN PRINCIPAL
+# MAIN
 # =============================================================================
 
 main() {
-    # Mostrar banner
-    show_banner
+  show_banner
+  parse_arguments "$@"
+
+  log_info "Config:"
+  log_info "  AUTO_APPROVE   = $AUTO_APPROVE"
+  log_info "  SKIP_INIT      = $SKIP_INIT"
+  log_info "  SKIP_FRONTEND  = $SKIP_FRONTEND"
+  log_info "  SKIP_PROCESSING= $SKIP_PROCESSING"
+  log_info "  VERBOSE        = $VERBOSE"
+  echo
+
+  validate_dependencies
+  validate_aws_access
+  validate_project_structure
+
+  if [[ "$AUTO_APPROVE" == "false" ]]; then
+    echo
+    echo "⚠️  CONFIRMACIÓN REQUERIDA - MODO DESTRUCTIVO"
     echo ""
-    
-    # Parse argumentos
-    parse_arguments "$@"
-    
-    # Mostrar configuración
-    log_info "Configuración del deployment:"
-    log_info "  Auto-approve: $AUTO_APPROVE"
-    log_info "  Skip init: $SKIP_INIT"
-    log_info "  Skip frontend: $SKIP_FRONTEND" 
-    log_info "  Skip processing: $SKIP_PROCESSING"
-    log_info "  Verbose: $VERBOSE"
+    echo "🧹 Este script va a:"
+    echo "   1. DESTRUIR toda la infraestructura existente"
+    echo "   2. LIMPIAR el state local"
+    echo "   3. CREAR todo desde cero"
     echo ""
-    
-    # Validaciones iniciales (críticas)
-    log_info "🔍 Ejecutando validaciones iniciales..."
-    validate_dependencies
-    validate_aws_access  
-    validate_project_structure
-    validate_terraform
-    log_success "Todas las validaciones pasaron ✅"
+    echo "💰 Esto puede generar costos en AWS."
+    echo "🕐 El proceso toma ~15-20 minutos."
     echo ""
-    
-    
-    # Confirmación interactiva
-    if [[ "$AUTO_APPROVE" == "false" ]]; then
-        echo "⚠️  El deployment modificará recursos en AWS."
-        echo "💰 Esto puede generar costos en su cuenta."
-        echo ""
-        read -p "¿Continuar con el deployment? (y/N): " -n 1 -r
-        echo ""
-        
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Deployment cancelado por el usuario"
-            exit 0
-        fi
-        echo ""
+    read -r -p "¿Confirmas DESTRUIR y RECREAR todo? (y/N): " ans
+    if [[ ! "$ans" =~ ^[Yy]$ ]]; then
+      log_info "Deployment cancelado por el usuario."
+      exit 0
     fi
-    
-    # Fase 1: Build del frontend (no requiere infraestructura)
-    log_info "🎨 FASE 1: Build del frontend"
-    build_frontend || {
-        log_error "Falló build del frontend"
-        exit 1
-    }
-    
-    log_success "Fase 1 completada ✅"
     echo ""
-    
-    # Fase 2: Deployment de infraestructura (incluyendo ECR)
-    log_info "🏗️  FASE 2: Deployment de infraestructura"
-    
-    terraform_init || {
-        log_error "Falló terraform init"
-        exit 1
-    }
-    
-    sync_terraform_state || {
-        log_error "Falló sincronización de estado"
-        exit 1
-    }
-    
-    terraform_plan || {
-        log_error "Falló terraform plan"
-        exit 1
-    }
-    
-    terraform_apply || {
-        log_error "Falló terraform apply"
-        exit 1
-    }
-    
-    log_success "Fase 2 completada ✅"
+    log_warning "🚀 Iniciando deployment destructivo..."
     echo ""
-    
-    # Fase 3: Build del processing engine (requiere ECR creado por Terraform)
-    log_info "🐳 FASE 3: Build del processing engine"
-    
-    build_processing_engine || {
-        log_error "Falló build del processing engine"
-        exit 1
-    }
-    
-    log_success "Fase 3 completada ✅"
-    echo ""
-    
-    # Fase 4: Configuración post-deployment
-    log_info "⚙️  FASE 4: Configuración de servicios"
-    
-    configure_lambdas || {
-        log_warning "Configuración de Lambdas falló - Continuar manualmente"
-    }
-    
-    log_success "Fase 4 completada ✅"
-    echo ""
-    
-    # Fase 5: Verificación
-    log_info "✅ FASE 5: Verificación del deployment"
-    
-    verify_deployment || {
-        log_warning "Algunas verificaciones fallaron"
-    }
-    
-    # Mostrar resumen final
-    show_deployment_summary
+  fi
+
+  # Fase 1: build frontend
+  build_frontend
+
+  # Fase 2: terraform (siempre desde cero)
+  clean_and_reset
+  terraform_init
+  terraform_plan
+  terraform_apply
+
+  # Fase 3: processing engine (usa ECR creado por Terraform)
+  build_processing_engine
+
+  # Fase 4: resumen de outputs
+  show_outputs_summary
+
+  log_success "Deployment completado."
 }
 
-# =============================================================================
-# MANEJO DE ERRORES Y CLEANUP
-# =============================================================================
-
-cleanup() {
-    local exit_code=$?
-    
-    # Limpiar archivos temporales
-    cd "$TF_DIR" 2>/dev/null || true
-    rm -f .current_plan tfplan-* .rebuild_processing_engine 2>/dev/null || true
-    
-    if [[ $exit_code -ne 0 ]]; then
-        echo ""
-        log_error "💥 DEPLOYMENT FALLÓ (código: $exit_code)"
-        echo ""
-        echo "🔍 INFORMACIÓN DE DEBUG:"
-        echo "   📂 Directorio Terraform: $TF_DIR"
-        echo "   📋 Logs de Terraform: terraform show"
-        echo "   ☁️  Estado AWS: aws sts get-caller-identity"
-        echo ""
-        echo "🛠️  POSIBLES SOLUCIONES:"
-        echo "   1. Verificar connectivity: ping aws.amazon.com"
-        echo "   2. Validar credentials: aws sts get-caller-identity"
-        echo "   3. Revisar logs detallados con --verbose"
-        echo "   4. Ejecutar terraform plan manualmente"
-        echo ""
-    fi
-    
-    exit $exit_code
-}
-
-# Configurar trap para cleanup
-trap cleanup EXIT
-
-# Ejecutar función principal con todos los argumentos
 main "$@"
