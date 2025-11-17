@@ -100,3 +100,8 @@ output "cognito_client_id" {
   description = "Cognito User Pool Client ID"
   value       = module.cognito.user_pool_client_id
 }
+
+output "lambda_cognito_callback_function_name" {
+  description = "Cognito callback Lambda function name"
+  value       = module.lambda.lambda_cognito_callback_function_name
+}

@@ -293,6 +293,48 @@ clean_and_reset() {
 }
 
 # =============================================================================
+# POST-DEPLOYMENT CONFIGURATION
+# =============================================================================
+
+configure_cognito_lambda_env() {
+  log_info "Configurando variables de entorno de Lambda Cognito..."
+  cd "$TF_DIR"
+  
+  # Obtener outputs de Terraform
+  local cognito_domain client_id lambda_name frontend_url
+  
+  cognito_domain=$(terraform output -raw cognito_domain 2>/dev/null || true)
+  client_id=$(terraform output -raw cognito_client_id 2>/dev/null || true)
+  lambda_name=$(terraform output -raw lambda_cognito_callback_function_name 2>/dev/null || true)
+  frontend_url=$(terraform output -raw frontend_website_url 2>/dev/null || true)
+  
+  if [[ -z "$cognito_domain" || -z "$client_id" || -z "$lambda_name" ]]; then
+    log_warning "No se pudieron obtener todos los outputs necesarios para Cognito Lambda"
+    log_info "  cognito_domain: ${cognito_domain:-MISSING}"
+    log_info "  client_id: ${client_id:-MISSING}"  
+    log_info "  lambda_name: ${lambda_name:-MISSING}"
+    log_info "Saltando configuración de Lambda Cognito..."
+    return 0
+  fi
+  
+  log_info "Actualizando Lambda: $lambda_name"
+  log_info "  Cognito Domain: $cognito_domain"
+  log_info "  Client ID: ${client_id:0:8}..."
+  log_info "  Frontend URL: $frontend_url"
+  
+  # Actualizar variables de entorno de Lambda
+  if aws lambda update-function-configuration \
+    --function-name "$lambda_name" \
+    --environment "Variables={COGNITO_DOMAIN=$cognito_domain,CLIENT_ID=$client_id,FRONTEND_URL=$frontend_url}" \
+    --output table --query 'Environment.Variables' >/dev/null 2>&1; then
+    log_success "Variables de entorno de Lambda Cognito actualizadas correctamente"
+  else
+    log_error "Error actualizando variables de entorno de Lambda Cognito"
+    return 1
+  fi
+}
+
+# =============================================================================
 # POST-DEPLOYMENT (resumen muy simple)
 # =============================================================================
 
@@ -406,6 +448,9 @@ main() {
   terraform_init
   terraform_plan
   terraform_apply
+
+  # Fase 2.5: configurar Lambda Cognito post-deployment
+  configure_cognito_lambda_env
 
   # Fase 3: processing engine (usa ECR creado por Terraform)
   build_processing_engine
