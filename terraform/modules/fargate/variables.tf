@@ -95,7 +95,7 @@ variable "fargate_memory" {
 variable "fargate_desired_count" {
   description = "Desired number of Fargate tasks"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "fargate_min_capacity" {
