@@ -12,4 +12,4 @@ key_pair_name       = "vockey"
 db_username         = "agro"
 db_password         = "agro12345"
 db_instance_class   = "db.t3.micro"
-create_read_replica = true
+create_read_replica = false
