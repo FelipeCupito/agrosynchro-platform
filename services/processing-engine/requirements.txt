@@ -3,5 +3,6 @@ flask-cors==4.0.0
 boto3==1.34.0
 botocore==1.34.0
 Pillow==10.2.0
+numpy==1.24.3
 python-magic==0.4.27
 psycopg2-binary==2.9.9

@@ -1,8 +1,9 @@
 import React from "react";
-import { BarChart3, FileText, LogIn, LogOut, Leaf } from "lucide-react";
+import { BarChart3, FileText, LogIn, LogOut, Leaf, Camera } from "lucide-react";
 
 import Dashboard from "./pages/Dashboard";
 import Reports from "./pages/Reports";
+import DroneImages from "./pages/DroneImages";
 import { login, logout, processOAuthCallback, isAuthenticated, getUserInfo } from "./auth";
 
 
@@ -114,6 +115,13 @@ function App() {
             Dashboard
           </button>
           <button 
+            className={`btn ${tab === "images" ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => setTab("images")}
+          >
+            <Camera size={18} />
+            Imágenes
+          </button>
+          <button 
             className={`btn ${tab === "reports" ? "btn-primary" : "btn-ghost"}`}
             onClick={() => setTab("reports")}
           >
@@ -149,6 +157,7 @@ function App() {
 
       <main className="main-content">
         {tab === "dashboard" && <Dashboard userId={userId} />}
+        {tab === "images" && <DroneImages userId={userId} />}
         {tab === "reports" && <Reports userId={userId} />}
       </main>
     </div>

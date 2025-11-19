@@ -7,6 +7,7 @@ const Reports = ({ userId }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expandedReport, setExpandedReport] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
 
   // Cargar reportes al montar
 
@@ -26,14 +27,16 @@ const Reports = ({ userId }) => {
     setLoading(false);
   };
 
-  const handleGetTodayReport = async () => {
+  const handleGenerateReport = async () => {
     setError("");
-    const today = new Date().toISOString().slice(0, 10);
+    setLoading(true);
     try {
-      await postReport({ userid: userId, date: today });
+      await postReport({ userid: userId, date: selectedDate });
       await fetchReports();
     } catch (err) {
-      setError("Error al obtener el reporte de hoy");
+      setError("Error al generar el reporte");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -92,20 +95,66 @@ const Reports = ({ userId }) => {
           </p>
         </div>
         <div className="card-content">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
-            <Calendar size={20} style={{ color: 'var(--primary)' }} />
-            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-              Fecha: {new Date().toLocaleDateString('es-AR', { 
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {/* Date Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <Calendar size={20} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1 }}>
+                <label 
+                  htmlFor="report-date" 
+                  style={{ 
+                    fontSize: 'var(--font-size-sm)', 
+                    color: 'var(--text-secondary)',
+                    fontWeight: '500'
+                  }}
+                >
+                  Seleccionar Fecha:
+                </label>
+                <input
+                  id="report-date"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  max={new Date().toISOString().slice(0, 10)}
+                  style={{
+                    padding: '0.625rem 0.875rem',
+                    fontSize: 'var(--font-size-base)',
+                    borderRadius: 'var(--border-radius)',
+                    border: '1px solid var(--gray)',
+                    fontFamily: 'var(--font-primary)',
+                    color: 'var(--text-primary)',
+                    backgroundColor: 'var(--white)',
+                    cursor: 'pointer',
+                    transition: 'border-color 0.2s ease',
+                    maxWidth: '200px'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = 'var(--primary)'}
+                  onBlur={(e) => e.target.style.borderColor = 'var(--gray)'}
+                />
+              </div>
+            </div>
+
+            {/* Selected Date Display */}
+            <div style={{ 
+              padding: '0.75rem 1rem',
+              background: 'var(--light-gray)',
+              borderRadius: 'var(--border-radius)',
+              fontSize: 'var(--font-size-sm)',
+              color: 'var(--text-secondary)',
+              borderLeft: '3px solid var(--primary)'
+            }}>
+              <strong style={{ color: 'var(--text-primary)' }}>Fecha seleccionada:</strong>{' '}
+              {new Date(selectedDate + 'T00:00:00').toLocaleDateString('es-AR', { 
                 weekday: 'long', 
                 year: 'numeric', 
                 month: 'long', 
                 day: 'numeric' 
               })}
-            </span>
+            </div>
           </div>
           
           {error && (
-            <div className="alert alert-error">
+            <div className="alert alert-error" style={{ marginTop: '1rem' }}>
               <AlertCircle size={16} style={{ marginRight: '0.5rem' }} />
               {error}
             </div>
@@ -113,8 +162,9 @@ const Reports = ({ userId }) => {
 
           <button 
             className="btn btn-primary"
-            onClick={handleGetTodayReport} 
+            onClick={handleGenerateReport} 
             disabled={!userId || loading}
+            style={{ marginTop: '1rem' }}
           >
             {loading ? (
               <>
@@ -124,7 +174,7 @@ const Reports = ({ userId }) => {
             ) : (
               <>
                 <Download size={16} />
-                Obtener Reporte de Hoy
+                Generar Reporte
               </>
             )}
           </button>
@@ -173,7 +223,7 @@ const Reports = ({ userId }) => {
                     <tr key={idx}>
                       <td>
                         <span style={{ fontWeight: '600', color: 'var(--text-primary)' }}>
-                          {new Date(r.date).toLocaleDateString('es-AR', {
+                          {new Date(r.date + 'T00:00:00').toLocaleDateString('es-AR', {
                             day: '2-digit',
                             month: '2-digit',
                             year: 'numeric'

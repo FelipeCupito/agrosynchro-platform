@@ -236,6 +236,8 @@ module "api_gateway" {
   lambda_parameters_get_invoke_arn  = module.lambda.lambda_parameters_get_invoke_arn
   lambda_parameters_post_invoke_arn = module.lambda.lambda_parameters_post_invoke_arn
   lambda_sensor_data_get_invoke_arn = module.lambda.lambda_sensor_data_get_invoke_arn
+  lambda_get_images_invoke_arn      = module.lambda.lambda_get_images_invoke_arn
+  lambda_post_image_invoke_arn      = module.lambda.lambda_post_image_invoke_arn
   lambda_reports_get_invoke_arn     = module.lambda.lambda_reports_get_invoke_arn
   lambda_reports_post_invoke_arn    = module.lambda.lambda_reports_post_invoke_arn
 
@@ -245,6 +247,8 @@ module "api_gateway" {
   lambda_parameters_get_function_arn  = module.lambda.lambda_parameters_get_function_arn
   lambda_parameters_post_function_arn = module.lambda.lambda_parameters_post_function_arn
   lambda_sensor_data_get_function_arn = module.lambda.lambda_sensor_data_get_function_arn
+  lambda_get_images_function_arn      = module.lambda.lambda_get_images_function_arn
+  lambda_post_image_function_arn      = module.lambda.lambda_post_image_function_arn
   lambda_reports_get_function_arn     = module.lambda.lambda_reports_get_function_arn
   lambda_reports_post_function_arn    = module.lambda.lambda_reports_post_function_arn
 

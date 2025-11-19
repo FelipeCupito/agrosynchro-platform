@@ -15,6 +15,9 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from datetime import datetime
 import logging
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -590,8 +593,8 @@ def is_image_processed(s3_key):
             logger.warning(f"Image not found in processed bucket, will process: {s3_key}")
             return False  # No existe en processed, procesar
 
-def extract_drone_id_from_key(s3_key):
-    """Extrae drone_id del path S3"""
+def extract_user_id_from_key(s3_key):
+    """Extrae user_id del path S3"""
     # drone-images/2025/10/19/drone001_uuid.jpg → drone001
     try:
         filename = s3_key.split('/')[-1]
@@ -599,11 +602,245 @@ def extract_drone_id_from_key(s3_key):
     except:
         return "unknown"
 
+def detect_fire(image):
+    """
+    Detecta presencia de fuego basado en análisis de color
+    Busca píxeles con tonos naranja/rojo brillante característicos del fuego
+    """
+    img_array = np.array(image)
+    
+    # Separar canales RGB
+    r = img_array[:, :, 0].astype(float)
+    g = img_array[:, :, 1].astype(float)
+    b = img_array[:, :, 2].astype(float)
+    
+    # Criterios para detectar fuego:
+    # 1. Rojo alto (> 180)
+    # 2. Verde moderado-bajo (< rojo)
+    # 3. Azul bajo (< verde)
+    # 4. Brillo alto (suma RGB > 400)
+    
+    fire_mask = (
+        (r > 180) &  # Rojo intenso
+        (g > 80) & (g < r * 0.8) &  # Verde presente pero menor que rojo
+        (b < g * 0.7) &  # Azul mucho menor
+        ((r + g + b) > 400)  # Brillo alto
+    )
+    
+    # Calcular porcentaje de píxeles que parecen fuego
+    total_pixels = fire_mask.size
+    fire_pixels = np.sum(fire_mask)
+    fire_percentage = (fire_pixels / total_pixels) * 100
+    
+    # Detectar regiones contiguas de fuego (clusters)
+    fire_detected = fire_percentage > 0.5  # Más de 0.5% de la imagen
+    
+    return {
+        'fire_detected': fire_detected,
+        'fire_coverage': round(fire_percentage, 2),
+        'fire_mask': fire_mask
+    }
+
+
+def calculate_vegetation_metrics(image):
+    """Calcula métricas de vegetación basadas en análisis de color"""
+    img_array = np.array(image)
+    
+    # Separar canales RGB
+    r = img_array[:, :, 0].astype(float)
+    g = img_array[:, :, 1].astype(float)
+    b = img_array[:, :, 2].astype(float)
+    
+    # Calcular "índice de verdor" simple (más verde = más vegetación)
+    # Formula: (Verde - Rojo) / (Verde + Rojo) normalizado
+    with np.errstate(divide='ignore', invalid='ignore'):
+        green_index = np.where((g + r) > 0, (g - r) / (g + r), 0)
+    
+    # Normalizar a 0-100
+    green_percentage = np.clip(green_index, -1, 1)
+    green_percentage = ((green_percentage + 1) / 2) * 100
+    
+    avg_green = float(np.mean(green_percentage))
+    
+    # Calcular brillo promedio
+    brightness = float(np.mean(img_array))
+    
+    return {
+        'green_coverage': round(avg_green, 1),
+        'brightness': round(brightness, 1)
+    }
+
+
+def create_vegetation_heatmap(image, fire_info=None):
+    """Crea un overlay SUTIL de mapa de calor sobre zonas verdes y FUEGO"""
+    img_array = np.array(image)
+    
+    # Separar canales
+    r = img_array[:, :, 0].astype(float)
+    g = img_array[:, :, 1].astype(float)
+    b = img_array[:, :, 2].astype(float)
+    
+    # Detectar píxeles "verdes" (donde verde > rojo y verde > azul)
+    green_mask = (g > r * 1.1) & (g > b * 1.1)
+    
+    # Crear overlay
+    overlay = img_array.copy()
+    overlay[green_mask] = [0, 200, 0]  # Verde más suave
+    
+    # Si hay detección de fuego, resaltar en ROJO BRILLANTE
+    if fire_info and fire_info['fire_detected']:
+        fire_mask = fire_info['fire_mask']
+        overlay[fire_mask] = [255, 50, 0]  # ROJO-NARANJA INTENSO para fuego
+        logger.warning(f"🔥 FIRE DETECTED IN IMAGE! Coverage: {fire_info['fire_coverage']}%")
+    
+    # Mezclar original con overlay - MÁS SUTIL (20% overlay normal, 50% si hay fuego)
+    blend_factor = 0.5 if (fire_info and fire_info['fire_detected']) else 0.2
+    blended = (img_array * (1 - blend_factor) + overlay * blend_factor).astype(np.uint8)
+    
+    return Image.fromarray(blended)
+
+
+def add_info_overlay(image, metrics, user_id, fire_info=None):
+    """Agrega overlay de información sobre la imagen - TAMAÑO FIJO Y COMPACTO"""
+    width, height = image.size
+    
+    # Intentar cargar fuentes con tamaños fijos
+    try:
+        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+        font_alert = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
+    except:
+        font_title = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+        font_alert = ImageFont.load_default()
+    
+    # OVERLAY SUPERIOR COMPACTO - TAMAÑO FIJO (120px altura)
+    overlay_height = 120
+    overlay = Image.new('RGBA', image.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    overlay_draw.rectangle([(0, 0), (width, overlay_height)], fill=(0, 0, 0, 160))
+    
+    # Combinar overlay con imagen original
+    image = image.convert('RGBA')
+    image = Image.alpha_composite(image, overlay)
+    image = image.convert('RGB')
+    
+    draw = ImageDraw.Draw(image)
+    
+    # Contenido del overlay superior
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    draw.text((15, 10), f"AgroSynchro - Análisis de Campo", fill=(255, 255, 255), font=font_title)
+    draw.text((15, 45), f"📅 {timestamp}", fill=(200, 200, 200), font=font_small)
+    draw.text((15, 75), f"🌱 Vegetación: {metrics['green_coverage']}%", fill=(100, 255, 100), font=font_small)
+    
+    # ALERTA DE FUEGO - ESQUINA INFERIOR DERECHA FIJA (si hay fuego)
+    if fire_info and fire_info['fire_detected']:
+        fire_box_width = 350
+        fire_box_height = 80
+        fire_x = width - fire_box_width - 15
+        fire_y = height - fire_box_height - 15
+        
+        # Crear overlay rojo semi-transparente
+        fire_overlay = Image.new('RGBA', image.size, (0, 0, 0, 0))
+        fire_draw = ImageDraw.Draw(fire_overlay)
+        fire_draw.rectangle(
+            [(fire_x, fire_y), (fire_x + fire_box_width, fire_y + fire_box_height)], 
+            fill=(220, 0, 0, 200)
+        )
+        
+        image = image.convert('RGBA')
+        image = Image.alpha_composite(image, fire_overlay)
+        image = image.convert('RGB')
+        
+        # Texto de alerta
+        fire_draw_final = ImageDraw.Draw(image)
+        fire_draw_final.text((fire_x + 10, fire_y + 10), "🔥 FUEGO DETECTADO", fill=(255, 255, 255), font=font_alert)
+        fire_draw_final.text((fire_x + 10, fire_y + 50), f"Cobertura: {fire_info['fire_coverage']}%", fill=(255, 255, 0), font=font_small)
+    else:
+        # Indicador de estado solo si NO hay fuego - ESQUINA INFERIOR DERECHA
+        status_box_width = 200
+        status_box_height = 50
+        status_x = width - status_box_width - 15
+        status_y = height - status_box_height - 15
+        
+        status_color = (100, 255, 100) if metrics['green_coverage'] > 50 else (255, 200, 100) if metrics['green_coverage'] > 30 else (255, 100, 100)
+        status_text = "Excelente" if metrics['green_coverage'] > 50 else "Moderado" if metrics['green_coverage'] > 30 else "Bajo"
+        
+        status_overlay = Image.new('RGBA', image.size, (0, 0, 0, 0))
+        status_draw = ImageDraw.Draw(status_overlay)
+        status_draw.rectangle(
+            [(status_x, status_y), (status_x + status_box_width, status_y + status_box_height)], 
+            fill=(0, 0, 0, 160)
+        )
+        
+        image = image.convert('RGBA')
+        image = Image.alpha_composite(image, status_overlay)
+        image = image.convert('RGB')
+        
+        status_draw_final = ImageDraw.Draw(image)
+        status_draw_final.text((status_x + 10, status_y + 15), f"Estado: {status_text}", fill=status_color, font=font_small)
+    
+    return image
+
+
 def simple_image_process(image_bytes):
-    """Procesamiento básico de imagen"""
-    # Por ahora, solo devolver la imagen original
-    # Más adelante: resize, análisis, etc.
-    return image_bytes
+    """
+    Procesamiento de imagen agrícola con análisis visual
+    - Detección de FUEGO 🔥
+    - Mejora de contraste
+    - Mapa de calor de vegetación
+    - Overlay de información
+    """
+    try:
+        # Abrir imagen desde bytes
+        image = Image.open(BytesIO(image_bytes))
+        
+        # Convertir a RGB si es necesario
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # 1. DETECTAR FUEGO PRIMERO (crítico)
+        fire_info = detect_fire(image)
+        if fire_info['fire_detected']:
+            logger.warning(f"🔥🔥🔥 FIRE ALERT! Coverage: {fire_info['fire_coverage']}% 🔥🔥🔥")
+        
+        # 2. Calcular métricas de vegetación
+        metrics = calculate_vegetation_metrics(image)
+        logger.info(f"📊 Image metrics: {metrics}")
+        
+        # 3. Mejorar contraste (hace la imagen más "clara")
+        enhancer = ImageEnhance.Contrast(image)
+        image = enhancer.enhance(1.3)  # 30% más contraste
+        
+        # 4. Mejorar saturación (hace los colores más vivos)
+        enhancer = ImageEnhance.Color(image)
+        image = enhancer.enhance(1.2)  # 20% más saturación
+        
+        # 5. Crear mapa de calor (vegetación + FUEGO)
+        image = create_vegetation_heatmap(image, fire_info)
+        
+        # 6. Agregar overlay de información (incluye alerta de fuego)
+        image = add_info_overlay(image, metrics, "user", fire_info)
+        
+        # 7. Resize a tamaño óptimo (si la imagen es muy grande)
+        max_size = 1920  # Full HD
+        if max(image.size) > max_size:
+            image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+        
+        # Convertir de vuelta a bytes
+        output = BytesIO()
+        image.save(output, format='JPEG', quality=85, optimize=True)
+        processed_bytes = output.getvalue()
+        
+        logger.info(f"✅ Image processed: {len(image_bytes)} bytes → {len(processed_bytes)} bytes")
+        
+        # Devolver bytes procesados + info de fuego para alertas
+        return processed_bytes, fire_info
+        
+    except Exception as e:
+        logger.error(f"❌ Error processing image: {e}")
+        # Si falla el procesamiento, devolver original sin info de fuego
+        return image_bytes, {'fire_detected': False, 'fire_coverage': 0.0}
 
 def analyze_field_condition(image_bytes):
     """Simula análisis de condición del campo basado en imagen"""
@@ -633,7 +870,7 @@ def analyze_field_condition(image_bytes):
     return field_status, confidence
 
 
-def save_to_db(drone_id, raw_key, processed_key, field_status=None, confidence=None):
+def save_to_db(user_id, raw_key, processed_key, field_status=None, confidence=None):
     """Guarda metadatos en RDS"""
     try:
         conn = psycopg2.connect(
@@ -646,7 +883,7 @@ def save_to_db(drone_id, raw_key, processed_key, field_status=None, confidence=N
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS drone_images (
                 id SERIAL PRIMARY KEY,
-                drone_id VARCHAR(255),
+                user_id VARCHAR(255),
                 raw_s3_key VARCHAR(500),
                 processed_s3_key VARCHAR(500),
                 field_status VARCHAR(50) DEFAULT 'unknown',
@@ -658,31 +895,37 @@ def save_to_db(drone_id, raw_key, processed_key, field_status=None, confidence=N
         
         # Insertar registro con análisis
         cursor.execute("""
-            INSERT INTO drone_images (drone_id, raw_s3_key, processed_s3_key, field_status, analysis_confidence, analyzed_at) 
+            INSERT INTO drone_images (user_id, raw_s3_key, processed_s3_key, field_status, analysis_confidence, analyzed_at) 
             VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-        """, (drone_id, raw_key, processed_key, field_status or 'unknown', confidence or 0.0))
-        
+        """, (user_id, raw_key, processed_key, field_status or 'unknown', confidence or 0.0))
+
         conn.commit()
         conn.close()
-        logger.info(f"💾 Saved to DB: {drone_id} - Status: {field_status} ({confidence:.2f})")
+        logger.info(f"💾 Saved to DB: {user_id} - Status: {field_status} ({confidence:.2f})")
     except Exception as e:
         logger.error(f"Error saving to DB: {e}")
 
 def process_image_from_s3(s3_key):
-    """Descarga, procesa y guarda imagen"""
+    """Descarga, procesa y guarda imagen con detección de fuego"""
     try:
-        # Extraer drone_id del s3_key
-        drone_id = extract_drone_id_from_key(s3_key)
+        # Extraer user_id del s3_key
+        user_id = extract_user_id_from_key(s3_key)
         
         # Descargar imagen
         response = s3_client.get_object(Bucket=RAW_IMAGES_BUCKET, Key=s3_key)
         image_data = response['Body'].read()
         
-        # Procesar imagen (resize ejemplo)
-        processed_data = simple_image_process(image_data)
+        # Procesar imagen (INCLUYE DETECCIÓN DE FUEGO)
+        processed_data, fire_info = simple_image_process(image_data)
         
         # Analizar condición del campo
         field_status, confidence = analyze_field_condition(image_data)
+        
+        # Si se detectó fuego, cambiar el field_status
+        if fire_info['fire_detected']:
+            field_status = 'FIRE_DETECTED'
+            confidence = fire_info['fire_coverage'] / 100.0
+            logger.warning(f"🔥 Fire detected in image {s3_key}: {fire_info['fire_coverage']}%")
         
         # Subir imagen procesada
         processed_key = f"processed/{s3_key}"
@@ -694,25 +937,24 @@ def process_image_from_s3(s3_key):
         )
         
         # Guardar en RDS con análisis
-        save_to_db(drone_id, s3_key, processed_key, field_status, confidence)
+        save_to_db(user_id, s3_key, processed_key, field_status, confidence)
         
-        # Eliminar imagen raw después de procesamiento exitoso
-        try:
-            s3_client.delete_object(Bucket=RAW_IMAGES_BUCKET, Key=s3_key)
-            logger.info(f"🗑️  Deleted raw image: {s3_key}")
-        except Exception as delete_error:
-            logger.error(f"⚠️  Warning: Could not delete raw image {s3_key}: {delete_error}")
-        
-        logger.info(f"✅ Processed image: {s3_key}")
+        logger.info(f"✅ Processed image: {s3_key} - Status: {field_status}")
         
     except Exception as e:
         logger.error(f"❌ Error processing {s3_key}: {e}")
 
 def poll_s3_for_images():
     """Revisa S3 bucket por imágenes nuevas"""
+    logger.info("Polling S3 for new images...")
+    logger.info(f"S3 Client: {s3_client}")
+    logger.info(f"RAW_IMAGES_BUCKET: {RAW_IMAGES_BUCKET}")
     try:
+        
         if not s3_client or not RAW_IMAGES_BUCKET:
+            logger.error("S3 client or RAW_IMAGES_BUCKET not configured")
             return
+
             
         # Listar objetos en raw-images bucket
         response = s3_client.list_objects_v2(
@@ -721,7 +963,7 @@ def poll_s3_for_images():
         )
         
         objects = response.get('Contents', [])
-        logger.debug(f"Found {len(objects)} objects in S3")
+        logger.info(f"Found {len(objects)} objects in S3")
         
         for obj in objects:
             s3_key = obj['Key']
@@ -737,7 +979,8 @@ def poll_s3_for_images():
 def image_polling_worker():
     """Worker thread que revisa S3 cada 30 segundos"""
     global worker_running
-    logger.info("Image polling worker started")
+    logger.info("Image polling For the Worker started")
+
     
     while worker_running:
         poll_s3_for_images()
@@ -807,7 +1050,7 @@ def run_startup_migrations():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS drone_images (
                 id SERIAL PRIMARY KEY,
-                drone_id VARCHAR(255),
+                user_id VARCHAR(255),
                 raw_s3_key VARCHAR(500),
                 processed_s3_key VARCHAR(500),
                 field_status VARCHAR(50) DEFAULT 'unknown',
