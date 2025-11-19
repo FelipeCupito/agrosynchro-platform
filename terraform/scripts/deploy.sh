@@ -280,6 +280,48 @@ terraform_apply() {
   log_success "Infraestructura desplegada"
 }
 
+# Invoca la Lambda init_db para crear las tablas en la DB.
+invoke_init_db() {
+  log_info "Invocando Lambda init_db para inicializar la base de datos..."
+
+  # Nombre fijo de la función (simplificado): agrosynchro-init-db
+  local fname region tmp
+  fname="${PROJECT_TAG_VALUE}-init-db"
+
+  # Determinar región (preferir aws configure, fallback a terraform output)
+  region=$(aws configure get region 2>/dev/null || true)
+  if [[ -z "$region" ]]; then
+    region=$(cd "$TF_DIR" && terraform output -raw region 2>/dev/null || true)
+  fi
+
+  log_info "Lambda init_db detectada: $fname (región: ${region:-default})"
+
+  tmp=$(mktemp /tmp/init_db_resp.XXXX 2>/dev/null || echo init_db_response.json)
+
+  for i in {1..10}; do
+    log_info "Attempt $i: invoking $fname..."
+    if [[ -n "$region" ]]; then
+      if aws lambda invoke --function-name "$fname" --payload '{}' "$tmp" --region "$region"; then
+        log_success "Invocación exitosa. Response file: $tmp"
+        cat "$tmp" || true
+        return 0
+      fi
+    else
+      if aws lambda invoke --function-name "$fname" --payload '{}' "$tmp"; then
+        log_success "Invocación exitosa. Response file: $tmp"
+        cat "$tmp" || true
+        return 0
+      fi
+    fi
+
+    log_warning "Invocación falló, esperando 10s y reintentando..."
+    sleep 10
+  done
+
+  log_error "No se pudo invocar init_db después de varios intentos. Revisa CloudWatch logs para /aws/lambda/$fname"
+  return 1
+}
+
 # -------------------------------------------------------------------
 # Exportar variables de Cognito desde outputs de Terraform al entorno
 # -------------------------------------------------------------------
@@ -520,6 +562,9 @@ main() {
   terraform_init
   terraform_plan
   terraform_apply
+
+  # Invocar la Lambda que inicializa la DB (si es posible/resuelto)
+  invoke_init_db || log_warning "invoke_init_db devolvió fallo (continúo con el resto del deploy)"
 
   # Exportar los valores de Cognito que Terraform haya creado para que las siguientes etapas los usen
   export_cognito_envs_from_tf
