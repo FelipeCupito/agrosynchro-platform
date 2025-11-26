@@ -114,7 +114,7 @@ Importante: El ID se enceuntra en la parte superior derecha, una vez realizada l
 
 ```bash
 	cd terraform
-	./send_sendor_data.sh
+	./scripts/send_sendor_data.sh
    cd ..
 ```
 
