@@ -67,6 +67,9 @@
 
 3. **Ejecutar deployment**
    ```bash
+
+   # Iniciar terraform
+    terraform init
    # Hacer ejecutables los scripts
    chmod +x terraform/scripts/*.sh
    
