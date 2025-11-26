@@ -14,4 +14,4 @@ db_password         = "agro12345"
 db_instance_class   = "db.t3.micro"
 create_read_replica = false
 
-api_key = "AIzaSyCK1EV-cdmU-QkM-Ac0ogP9ffoB0TwzYUg"
+api_key = "AIzaSyCj_fUOTip5670A6OpoKaqOgrGDXQ_5uZo"
