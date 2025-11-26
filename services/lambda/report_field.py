@@ -88,7 +88,7 @@ def lambda_handler(event, context):
     db_user = os.environ.get("DB_USER", "postgres")
     db_password = os.environ.get("DB_PASSWORD")
     db_port = int(os.environ.get("DB_PORT", "5432"))
-    gemini_api_key = os.environ.get("GEMINI_API_KEY", "insert api key here")
+    gemini_api_key = os.environ.get("API_KEY", "insert api key here")
 
     try:
         # Conectar a la base de datos y validar usuario
