@@ -44,7 +44,7 @@
 - **Node.js + npm** (para frontend)
 - **jq, bc** (utilities Unix estándar)
 
-### Deployment Automático (Recomendado) ⭐
+### Deployment 
 
 **Pasos de ejecución:**
 
@@ -92,7 +92,10 @@ aws configure
    # debe pasarle como argumento a este script su APIKEY para poder generar los reportes.
 
    # De todas formas ya está en uso una APIKEY de uno de los integrantes del grupo, pero si se produce un error al generar los reortes (producto de que se alcanzó el rate limit de la APIKEY), entonces será necesario introducir una nueva.
+```
+ Aclaración: Entendemos que tendríamos que haber utilizado el Servicio de "Secrets Manager" para guardar la APIKey utilizada para generar los reportes y que no hacerlo genera un problema de seguridad al tener la APIKey expuesta. Pudimos integrarlo a la arquitectura, pero no logramos que funcione correctamente la generación de reportes y por ese motivo optamos por no incluirlo, de todas formas queríamos comentarlo.
 
+```bash
    # Paso 6 (opcional): En caso de que cognito falle, por favor ejecutar los siguientes comandos. 
    
    #Es importante estar parado en el directorio correcto al momento de correr el script.
@@ -108,6 +111,7 @@ Para poder probar el correcto funcionamiento de la aplicación se deben correr l
 Primero está el script que envía datos de sensores. Se va a solicitar el ID del usuario en cuestión, para poder asociar a dicho ID los datos que se envian.
 
 Importante: El ID se enceuntra en la parte superior derecha, una vez realizada la autenticación mediante cognito.
+
 ```bash
 	cd terraform
 	./send_sendor_data.sh
