@@ -44,7 +44,7 @@
 - **Node.js + npm** (para frontend)
 - **jq, bc** (utilities Unix estándar)
 
-### Deployment Automático (Recomendado) ⭐
+### Deployment 
 
 **Pasos de ejecución:**
 
@@ -93,6 +93,16 @@ aws configure
 
    # De todas formas ya está en uso una APIKEY de uno de los integrantes del grupo, pero si se produce un error al generar los reortes (producto de que se alcanzó el rate limit de la APIKEY), entonces será necesario introducir una nueva.
 ```
+ Aclaración: Entendemos que tendríamos que haber utilizado el Servicio de "Secrets Manager" para guardar la APIKey utilizada para generar los reportes y que no hacerlo genera un problema de seguridad al tener la APIKey expuesta. Pudimos integrarlo a la arquitectura, pero no logramos que funcione correctamente la generación de reportes y por ese motivo optamos por no incluirlo, de todas formas queríamos comentarlo.
+
+```bash
+   # Paso 6 (opcional): En caso de que cognito falle, por favor ejecutar los siguientes comandos. 
+   
+   #Es importante estar parado en el directorio correcto al momento de correr el script.
+
+   cd terraform
+   ./scripts/update-cognito-lambda.sh
+```
 
 4. **Enviar datos de prueba**
 
@@ -101,15 +111,20 @@ Para poder probar el correcto funcionamiento de la aplicación se deben correr l
 Primero está el script que envía datos de sensores. Se va a solicitar el ID del usuario en cuestión, para poder asociar a dicho ID los datos que se envian.
 
 Importante: El ID se enceuntra en la parte superior derecha, una vez realizada la autenticación mediante cognito.
+
 ```bash
 	cd terraform
 	./send_sendor_data.sh
+   cd ..
 ```
 
 Luego el script para cargar imágenes. También le solicitará el ID del usuario para el que quiere asociar las imágenes y además la ruta donde están las imágenes que quiere cargar.
 
+Hay que ejecutarlo parado /terraform/scripts
+
 ```bash
-	./terraform/scripts/upload_directory_images.sh
+   cd terraform/scripts/
+	./upload_directory_images.sh
 ```
 
 ## Elección de arquitectura
