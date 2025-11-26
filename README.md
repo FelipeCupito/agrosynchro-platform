@@ -104,12 +104,16 @@ Importante: El ID se enceuntra en la parte superior derecha, una vez realizada l
 ```bash
 	cd terraform
 	./send_sendor_data.sh
+   cd ..
 ```
 
 Luego el script para cargar imágenes. También le solicitará el ID del usuario para el que quiere asociar las imágenes y además la ruta donde están las imágenes que quiere cargar.
 
+Hay que ejecutarlo parado /terraform/scripts
+
 ```bash
-	./terraform/scripts/upload_directory_images.sh
+   cd terraform/scripts/
+	./upload_directory_images.sh
 ```
 
 ## Elección de arquitectura
