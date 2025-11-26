@@ -106,6 +106,7 @@ locals {
     DB_PORT                 = var.db_port
     PROCESSED_IMAGES_BUCKET = var.processed_images_bucket_name
     REGION                  = var.region
+    API_KEY                 = var.api_key
   }
 }
 

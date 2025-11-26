@@ -70,3 +70,9 @@ variable "create_read_replica" {
   type        = bool
   default     = false
 }
+
+variable "api_key" {
+  description = "API key for reports generation external service"
+  type = string
+  sensitive = true
+}

@@ -133,3 +133,9 @@ variable "frontend_url" {
   default     = ""
 }
 
+variable "api_key" {
+  description = "API key for reports generation external service"
+  type = string
+  sensitive = true
+}
+

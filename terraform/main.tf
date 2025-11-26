@@ -206,6 +206,7 @@ module "lambda" {
   db_user     = var.db_username
   db_password = var.db_password
   db_port     = tostring(module.rds.db_instance_port)
+  api_key     = var.api_key
 
   cognito_domain    = ""
   cognito_client_id = ""
