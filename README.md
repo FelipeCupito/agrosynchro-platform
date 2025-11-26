@@ -50,7 +50,7 @@
 
 1. **Clonar y preparar el proyecto**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/FelipeCupito/agrosynchro-platform
    cd agrosynchro-platform
    ```
 
@@ -62,26 +62,27 @@
 	# AWS Secret Access Key: "..."
 	# AWS Session Token: "..."
 	# Default region name: "us-east-1"
-	# Default output format:  
-   ```
-	**Verificar identidad:**
-   ```bash
-   aws sts get-caller-identity
-   ```
+	# Default output format: "json"
+	```
 
 3. **Ejecutar deployment**
    ```bash
    # Hacer ejecutables los scripts
    chmod +x terraform/scripts/*.sh
    
-   # Deployment completo automático
-   ./terraform/scripts/deploy.sh -y
+   # Correr primero el siguiente comando
+   ./terraform/scripts/deploy.sh 
    
-   # Deployment interactivo (recomendado primera vez)
-   ./terraform/scripts/deploy.sh
+   # Luego correr el siguiente comando
+   ./terraform/scripts/update-docker-ecr.sh
+
+   # Para poder subir imágenes de manera provisoria modificar el script "upload-direcory_images" y agregar la URL de la API Gateway en la línea 22 de archivo.
+
+   # Dado que los reportes de generan mediante Inteligenica Artificial, es necesario utilizar una APIKey
    
-   # Ver opciones avanzadas
-   ./terraform/scripts/deploy.sh --help
+   cd services\lambda\report_field.py
+
+   #y en la línea 91 insertar su API KEY
    ```
 
 ### Opciones Avanzadas
@@ -234,6 +235,3 @@ Flujo de datos
 	5.	El frontend, alojado en el bucket S3 público, obtiene información a través del API Gateway.
 	6.	El tráfico interno entre los servicios se mantiene dentro de la VPC y se enruta mediante el VPC Endpoint.
 
-
-
-<img width="757" height="735" alt="image" src="https://github.com/user-attachments/assets/dd3e19b7-1bc6-4406-b067-b623e8a751b3" />
