@@ -142,11 +142,9 @@ fi
 
 # Obtener URL base de la API Gateway (o usar API_URL env)
 echo -e "${YELLOW}🔍 Obteniendo URL de la API Gateway (desde Terraform)...${NC}"
-# Si quieres hardcodear una URL (último recurso), ponla abajo en DEFAULT_API_BASE_URL
-# Ejemplo: DEFAULT_API_BASE_URL="https://xxxxx.execute-api.region.amazonaws.com/stage"
-DEFAULT_API_BASE_URL="https://xmwvmj69w0.execute-api.us-east-1.amazonaws.com/aws"
+DEFAULT_API_BASE_URL=$(terraform output -raw api_gateway_invoke_url)
 
-API_BASE_URL=$(terraform output -raw api_gateway_url 2>/dev/null || true)
+API_BASE_URL=$(terraform output -raw api_gateway_invoke_url 2>/dev/null || true)
 if [ -z "$API_BASE_URL" ]; then
     API_BASE_URL=$(terraform output -raw api_invoke_url 2>/dev/null || true)
 fi
@@ -157,7 +155,7 @@ if [ -z "$API_BASE_URL" ]; then
         echo -e "${YELLOW}⚠️ Usando URL hardcodeada: ${API_BASE_URL}${NC}"
     else
         echo -e "${RED}❌ Error: No se pudo obtener la URL de la API Gateway desde Terraform y no hay URL hardcodeada${NC}"
-        echo -e "${YELLOW}💡 Ejecuta: terraform output -raw api_gateway_url  o establece DEFAULT_API_BASE_URL en el script${NC}"
+        echo -e "${YELLOW}💡 Ejecuta: terraform output -raw api_gateway_invoke_url  o establece DEFAULT_API_BASE_URL en el script${NC}"
         exit 1
     fi
 fi
