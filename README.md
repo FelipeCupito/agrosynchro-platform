@@ -92,6 +92,13 @@ aws configure
    # debe pasarle como argumento a este script su APIKEY para poder generar los reportes.
 
    # De todas formas ya está en uso una APIKEY de uno de los integrantes del grupo, pero si se produce un error al generar los reortes (producto de que se alcanzó el rate limit de la APIKEY), entonces será necesario introducir una nueva.
+
+   # Paso 6 (opcional): En caso de que cognito falle, por favor ejecutar los siguientes comandos. 
+   
+   #Es importante estar parado en el directorio correcto al momento de correr el script.
+
+   cd terraform
+   ./scripts/update-cognito-lambda.sh
 ```
 
 4. **Enviar datos de prueba**
