@@ -6,9 +6,9 @@
 
 ### Separación de Responsabilidades
 - **API Gateway**: Recepción de datos externos (sensores IoT, drones)  
-- **Application Load Balancer**: Backend del dashboard web y APIs internas
 - **Fargate**: Motor de procesamiento containerizado con auto-scaling
 - **RDS**: Base de datos PostgreSQL Multi-AZ para persistencia
+- **Queue**: Cola de mansajes para procesar datos de los sensores e imágenes
 
 ## 📦 Módulos de Infraestructura
 
@@ -49,69 +49,67 @@
 **Pasos de ejecución:**
 
 1. **Clonar y preparar el proyecto**
-   ```bash
-   git clone https://github.com/FelipeCupito/agrosynchro-platform
-   cd agrosynchro-platform
-   ```
+
+```bash
+git clone https://github.com/FelipeCupito/agrosynchro-platform
+cd agrosynchro-platform
+```
 
 2. **Configurar AWS CLI**
-   ```bash
-	aws configure
-	# Ir al AWS Academy Lab y obtener credentials
-	# AWS Access Key ID: "ASIA..."
-	# AWS Secret Access Key: "..."
-	# AWS Session Token: "..."
-	# Default region name: "us-east-1"
-	# Default output format: "json"
-	```
+
+```bash
+aws configure
+# Ir al AWS Academy Lab y obtener credentials
+# AWS Access Key ID: ***********
+# AWS Secret Access Key: ***********
+# AWS Session Token: ***********
+# Default region name: us-east-1
+# Default output format: json
+```
 
 3. **Ejecutar deployment**
-   ```bash
 
-   # Iniciar terraform
+```bash
+   # Paso 1: Inicializar terraform
+    cd terraform
     terraform init
-   # Hacer ejecutables los scripts
+    cd ..
+
+   # Paso 2: Hacer ejecutables los scripts
    chmod +x terraform/scripts/*.sh
    
-   # Correr primero el siguiente comando
+   # Paso 3: Ejecutar el siguiente script para comenzar con el deploy
    ./terraform/scripts/deploy.sh 
    
-   # Luego correr el siguiente comando
+   # Paso 4: Subir la imagen de docker. Es necesario tener docker corriendo antes de ejecutarlo.
    ./terraform/scripts/update-docker-ecr.sh
 
-   # Para poder subir imágenes de manera provisoria modificar el script "upload-direcory_images" y agregar la URL de la API Gateway en la línea 22 de archivo.
+   # Dado que los reportes de generan mediante Inteligenica Artificial, es necesario utilizar una APIKey.
 
-   # Dado que los reportes de generan mediante Inteligenica Artificial, es necesario utilizar una APIKey
-   
-   cd services\lambda\report_field.py
+   # Paso 5: 
+   ./terraform/scripts/update-api-key.sh
 
-   #y en la línea 91 insertar su API KEY
-   ```
+   # debe pasarle como argumento a este script su APIKEY para poder generar los reportes.
 
-### Opciones Avanzadas
-```bash
-# Solo infraestructura (sin builds)
-./terraform/scripts/deploy.sh --skip-frontend --skip-processing -y
-
-# Con logs detallados para debugging
-./terraform/scripts/deploy.sh --verbose
+   # De todas formas ya está en uso una APIKEY de uno de los integrantes del grupo, pero si se produce un error al generar los reortes (producto de que se alcanzó el rate limit de la APIKEY), entonces será necesario introducir una nueva.
 ```
 
-### Testing del Sistema
+4. **Enviar datos de prueba**
+
+Para poder probar el correcto funcionamiento de la aplicación se deben correr los siguientes scripts que se encargan de simular el envío de datos de sensores y de imágenes
+
+Primero está el script que envía datos de sensores. Se va a solicitar el ID del usuario en cuestión, para poder asociar a dicho ID los datos que se envian.
+
+Importante: El ID se enceuntra en la parte superior derecha, una vez realizada la autenticación mediante cognito.
 ```bash
-# Una vez desplegado, probar con datos simulados
-cd terraform/scripts
-./send_sensor_data.sh
-# Ingresar User ID que aparece en la navbar del frontend
+	cd terraform
+	./send_sendor_data.sh
 ```
 
-### Validación
-```bash
-# Verificar endpoints
-curl -X GET $(terraform output -raw api_gateway_invoke_url)/ping
+Luego el script para cargar imágenes. También le solicitará el ID del usuario para el que quiere asociar las imágenes y además la ruta donde están las imágenes que quiere cargar.
 
-# Verificar frontend  
-curl -I $(terraform output -raw frontend_website_url)
+```bash
+	./terraform/scripts/upload_directory_images.sh
 ```
 
 ## Elección de arquitectura
@@ -127,9 +125,10 @@ La infraestructura de red se compone de subnets publicas, privadas y para la bas
 Almacenamiento S3
 
 Se definieron 3 buckets:
-	•	Frontend: Aloja los archivos estáticos del sitio web (HTML, CSS, JS).
-	•	Imágenes sin procesar: Recibe las imágenes enviadas por drones o sensores.
-	•	Imágenes procesadas: Almacena los resultados generados tras el análisis.
+
+- Frontend: Aloja los archivos estáticos del sitio web (HTML, CSS, JS).
+- Imágenes sin procesar: Recibe las imágenes enviadas por drones o sensores.
+- Imágenes procesadas: Almacena los resultados generados tras el análisis.
 
 Justificación:
 S3 ofrece almacenamiento de alta durabilidad, disponibilidad y bajo costo.
@@ -141,10 +140,11 @@ API Gateway
 
 El API Gateway actúa como punto de entrada único para los clientes y servicios externos.
 Expone endpoints REST que permiten:
-	•	La recepción de datos desde los sensores IoT.
-	•	El envío de mensajes a SQS.
-	•	La invocación de funciones Lambda para procesamiento o validaciones.
-	•	La integración con Cognito para autenticación.
+
+- La recepción de datos desde los sensores IoT.
+- El envío de mensajes a SQS.
+- La invocación de funciones Lambda para procesamiento o validaciones.
+- La integración con Cognito para autenticación.
 
 Justificación:
 API Gateway desacopla completamente la capa de acceso del backend, permite control de tráfico, autenticación, logging, rate limiting y escalabilidad automática.
@@ -164,11 +164,16 @@ Tambien facilita la escalabilidad horizontal de los servicios de procesamiento.
 Fargate
 
 El servicio Fargate ejecuta contenedores que:
-	1.	Consumen mensajes de SQS.
-	2.	Descargan imágenes sin procesar desde S3.
-	3.	Ejecutan algoritmos de procesamiento o análisis.
-	4.	Guardan los resultados en el bucket de imágenes procesadas.
-	5.	Registran metadatos y resultados en RDS.
+
+1. Consumen mensajes de SQS.
+
+2. Descargan imágenes sin procesar desde S3.
+
+3. Ejecutan algoritmos de procesamiento o análisis.
+
+4. Guardan los resultados en el bucket de imágenes procesadas.
+
+5. Registran metadatos y resultados en RDS.
 
 Justificación:
 Fargate permite ejecutar contenedores sin administrar servidores, ajustando automáticamente la capacidad a la carga de trabajo.
@@ -179,9 +184,12 @@ El acceso a S3 se realiza mediante el VPC Endpoint, lo que elimina la necesidad 
 Lambda
 
 Lambda se utiliza para operaciones rápidas y eventos desencadenados por API Gateway o SQS, tales como:
-	•	Validación o transformación de datos.
-	•	Envío de mensajes a la cola SQS.
-	•	Comunicación con Cognito o servicios externos.
+
+- Validación o transformación de datos.
+
+- Envío de mensajes a la cola SQS.
+
+- Comunicación con Cognito o servicios externos.
 
 Justificación:
 Permite ejecutar código bajo demanda con costos proporcionales al uso y sin administración de infraestructura.
@@ -192,8 +200,9 @@ Las funciones se despliegan dentro de la VPC, con acceso directo y seguro a RDS 
 RDS
 
 La base de datos relacional RDS almacena información estructurada y metadatos asociados a los procesos.
-	•	Instancia principal: maneja las operaciones de lectura y escritura.
-	•	Réplica de solo lectura: proporciona redundancia y capacidad adicional para consultas no críticas.
+
+- Instancia principal: maneja las operaciones de lectura y escritura.
+- Réplica de solo lectura: proporciona redundancia y capacidad adicional para consultas no críticas.
 
 Justificación:
 RDS asegura persistencia, integridad y disponibilidad de datos.
@@ -220,21 +229,3 @@ Justificación:
 Mejora la seguridad y el rendimiento, reduce la latencia y elimina costos asociados al tráfico a través de NAT Gateways.
 
 ⸻
-
-Monitoreo y observabilidad
-
-Los registros y métricas de API Gateway, Lambda y Fargate se centralizan en Amazon CloudWatch.
-Esto incluye métricas de utilización de CPU, memoria, tráfico de red y errores de aplicación.
-
-Justificación:
-Centralizar el monitoreo permite trazabilidad, auditoría y detección temprana de fallos.
-Facilita la generación de alarmas automáticas y dashboards operativos.
-
-Flujo de datos
-	1.	Los sensores IoT o drones envían datos e imágenes al API Gateway.
-	2.	API Gateway invoca una Lambda que valida los datos y los envía a la cola SQS.
-	3.	Fargate consume los mensajes de la cola, descarga las imágenes de S3 y ejecuta el procesamiento.
-	4.	Los resultados se guardan en el bucket S3 (imágenes procesadas) y los metadatos se almacenan en RDS.
-	5.	El frontend, alojado en el bucket S3 público, obtiene información a través del API Gateway.
-	6.	El tráfico interno entre los servicios se mantiene dentro de la VPC y se enruta mediante el VPC Endpoint.
-
